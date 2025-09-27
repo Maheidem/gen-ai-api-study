@@ -69,7 +69,17 @@ class LocalLLMClient:
         Args:
             module: Module containing tool-decorated functions
         """
-        # Module import automatically registers tools via decorators
+        # Import the tools from the module's registry
+        from .tools import registry as global_registry
+
+        # The builtin module uses the global registry
+        # Copy all tools from the global registry to our client's registry
+        for tool_name in global_registry.tools._tools:
+            self.tools._tools[tool_name] = global_registry.tools._tools[tool_name]
+        for schema in global_registry.tools._schemas:
+            if schema not in self.tools._schemas:  # Avoid duplicates
+                self.tools._schemas.append(schema)
+
         return self
 
     def list_models(self) -> ModelList:
