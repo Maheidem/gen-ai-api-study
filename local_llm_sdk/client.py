@@ -43,6 +43,7 @@ class LocalLLMClient:
         self.default_model = model
         self.tools = ToolRegistry()
         self.last_tool_calls = []  # Track tool calls from last request
+        self.last_thinking = ""  # Track thinking blocks from last request
 
         # API endpoints
         self.endpoints = {
@@ -83,6 +84,31 @@ class LocalLLMClient:
 
         return self
 
+    def _extract_thinking(self, content: str) -> tuple[str, str]:
+        """
+        Extract thinking blocks from model content.
+
+        Args:
+            content: Raw content from model that may contain [THINK]...[/THINK] blocks
+
+        Returns:
+            tuple of (clean_content, thinking_content)
+        """
+        import re
+
+        if not content:
+            return content, ""
+
+        # Extract thinking blocks
+        pattern = r'\[THINK\](.*?)\[/THINK\]'
+        thinking_matches = re.findall(pattern, content, re.DOTALL)
+        thinking = '\n'.join(match.strip() for match in thinking_matches) if thinking_matches else ""
+
+        # Remove thinking blocks from content
+        clean_content = re.sub(pattern, '', content, flags=re.DOTALL).strip()
+
+        return clean_content, thinking
+
     def list_models(self) -> ModelList:
         """Get list of available models from LM Studio."""
         response = requests.get(self.endpoints["models"], timeout=5)
@@ -98,6 +124,7 @@ class LocalLLMClient:
         use_tools: bool = True,
         stream: bool = False,
         return_full: bool = False,
+        include_thinking: bool = False,
         **kwargs
     ) -> Union[str, ChatCompletion]:
         """
@@ -111,13 +138,15 @@ class LocalLLMClient:
             use_tools: Whether to include registered tools
             stream: Whether to stream the response
             return_full: Force returning full ChatCompletion object
+            include_thinking: Whether to include thinking blocks in response
             **kwargs: Additional parameters for ChatCompletionRequest
 
         Returns:
             String response (simple mode) or ChatCompletion object (detailed mode)
         """
-        # Clear tool calls from previous request
+        # Clear tool calls and thinking from previous request
         self.last_tool_calls = []
+        self.last_thinking = ""
 
         # Convert string to messages if needed
         if isinstance(messages, str):
@@ -148,7 +177,36 @@ class LocalLLMClient:
         if response.choices[0].message.tool_calls and use_tools:
             # Store tool calls before they're lost in the second request
             self.last_tool_calls = response.choices[0].message.tool_calls
+
+            # Extract thinking from the first response (which may have tool calls + thinking)
+            first_content = response.choices[0].message.content or ""
+            _, first_thinking = self._extract_thinking(first_content)
+            if first_thinking:
+                self.last_thinking = first_thinking
+
             response = self._handle_tool_calls(response, messages)
+
+        # Extract thinking blocks from final response content
+        content = response.choices[0].message.content or ""
+        clean_content, final_thinking = self._extract_thinking(content)
+
+        # Combine thinking from first response and final response
+        if final_thinking:
+            if self.last_thinking:
+                self.last_thinking += "\n\n" + final_thinking
+            else:
+                self.last_thinking = final_thinking
+
+        # Update response content (remove thinking blocks unless requested)
+        if not include_thinking and self.last_thinking:
+            # Create a copy of the response with cleaned content
+            response.choices[0].message.content = clean_content
+        elif include_thinking and self.last_thinking:
+            # Include thinking with clear separation
+            if clean_content:
+                response.choices[0].message.content = f"**Thinking:**\n{self.last_thinking}\n\n**Response:**\n{clean_content}"
+            else:
+                response.choices[0].message.content = f"**Thinking:**\n{self.last_thinking}"
 
         # Return simple string or full response based on context
         if not return_full and (isinstance(messages[0], str) or len(messages) <= 2):

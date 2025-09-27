@@ -16,7 +16,7 @@
 # - The `local_llm_sdk` package installed (`pip install -e ..` from notebooks directory)
 
 # %%
-!pip install -e .. --force-reinstall -q
+#pip install -e .. --force-reinstall -q
 
 # %% [markdown]
 # ## 1. Setup and Initialization
@@ -251,6 +251,7 @@ for query in test_queries:
 
 # %%
 # Create a custom tool for reversing strings
+# Create a custom tool for reversing strings
 @client.register_tool("Reverse a text string")
 def reverse_string(text: str) -> dict:
     """Reverse the order of characters in a string."""
@@ -264,16 +265,27 @@ print("✅ Custom tool 'reverse_string' registered!")
 
 # Test the custom tool
 test_responses = [
-    client.chat("Reverse the text 'hello world'"),
-    client.chat("Is 'racecar' a palindrome? Reverse it to check"),
-    client.chat("Reverse 'Python SDK'")
-]
+    "Reverse the text 'hello world'",
+    "Is 'racecar' a palindrome? Reverse it to check",
+    "Reverse 'Python SDK'"]
 
 print("\n🔄 Reverse String Tool Tests:")
-print("=" * 50)
-for i, response in enumerate(test_responses, 1):
-    print(f"Test {i}: {response}")
+for query in test_responses:
+    response = client.chat(query)
+
+    print(f"Q: {query}")
+
+    # Check if tools were ACTUALLY called using client.last_tool_calls
+    if client.last_tool_calls:
+        print(f"   ✅ TOOLS ACTUALLY USED:")
+        for tc in client.last_tool_calls:
+            print(f"      🔧 {tc.function.name}({tc.function.arguments})")
+    else:
+        print(f"   ❌ NO TOOL USED - Model answered directly")
+
+    print(f"A: {response}")
     print("-" * 30)
+
 
 # %%
 # Create a more complex custom tool
@@ -304,6 +316,12 @@ print("✅ Custom tool 'text_analyzer' registered!")
 # Test the analyzer
 analysis_query = "Analyze the text 'The Quick Brown Fox Jumps Over The Lazy Dog 123!'"
 response = client.chat(analysis_query)
+
+if client.last_tool_calls:
+    print(f"   ✅ TOOLS ACTUALLY USED:")
+    for tc in client.last_tool_calls:
+        print(f"      🔧 {tc.function.name}({tc.function.arguments})")
+
 print(f"\n📊 Text Analysis:")
 print("=" * 50)
 print(f"Q: {analysis_query}")
@@ -463,10 +481,46 @@ print(f"Non-existent city: {response}")
 # - Build complex multi-tool workflows
 # - Experiment with different models and their tool-calling capabilities
 
+# %% [markdown]
+# ## 11. Thinking/Reasoning Blocks Support
+#
+# Some models output thinking blocks wrapped in [THINK]...[/THINK] tags.
+# The SDK automatically extracts and handles these.
+
+# %%
+# Test thinking block extraction
+thinking_query = "Calculate 47 times 89 step by step"
+response = client.chat(thinking_query)
+
+print("🧮 Response:")
+print(response)
+print()
+
+# Check if model used thinking blocks
+if client.last_thinking:
+    print("🧠 Model's Thinking Process:")
+    print("-" * 50)
+    print(client.last_thinking)
+    print("-" * 50)
+else:
+    print("🧠 No thinking blocks in this response")
+
+print()
+
+# You can also include thinking in the response
+print("📝 Response with thinking included:")
+response_with_thinking = client.chat(thinking_query, include_thinking=True)
+print(response_with_thinking)
+
+# %% [markdown]
+# ## 12. Tool Usage Detection Examples
+#
+# Demonstrate the CORRECT way to detect tool usage.
+# The model DOES use tools, but the final response doesn't show tool_calls.
+# We need to check client.last_tool_calls instead.
+
 # %%
 # Demonstrate the CORRECT way to detect tool usage
-# The model DOES use tools, but the final response doesn't show tool_calls
-# We need to check client.last_tool_calls instead
 
 test_queries = [
     "What is 2 plus 2?",  # Simple math - might not use tool
