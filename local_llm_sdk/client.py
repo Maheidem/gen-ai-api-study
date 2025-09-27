@@ -96,6 +96,7 @@ class LocalLLMClient:
         max_tokens: int = None,
         use_tools: bool = True,
         stream: bool = False,
+        return_full: bool = False,
         **kwargs
     ) -> Union[str, ChatCompletion]:
         """
@@ -108,6 +109,7 @@ class LocalLLMClient:
             max_tokens: Maximum tokens to generate
             use_tools: Whether to include registered tools
             stream: Whether to stream the response
+            return_full: Force returning full ChatCompletion object
             **kwargs: Additional parameters for ChatCompletionRequest
 
         Returns:
@@ -143,7 +145,7 @@ class LocalLLMClient:
             response = self._handle_tool_calls(response, messages)
 
         # Return simple string or full response based on context
-        if isinstance(messages[0], str) or len(messages) <= 2:
+        if not return_full and (isinstance(messages[0], str) or len(messages) <= 2):
             # Simple mode: return just the content
             return response.choices[0].message.content
         else:
