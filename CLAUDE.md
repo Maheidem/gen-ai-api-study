@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This is a Generative AI API study repository focused on comparing and documenting OpenAI and LM Studio API capabilities. The project aims to create comprehensive documentation and practical examples for developers transitioning between cloud-based (OpenAI) and local (LM Studio) AI model deployments.
+This is a Generative AI API study repository that has evolved into **Local LLM SDK** - a type-safe Python SDK for interacting with local LLM APIs that implement the OpenAI specification. The project provides a clean, extensible interface for working with LM Studio, Ollama, and other OpenAI-compatible servers.
 
 ## Study Approach
 
@@ -29,48 +29,86 @@ The repository follows a structured research methodology:
 - **Authentication**: Fixed key "lm-studio"
 - **Available Models**: Check via `/v1/models` endpoint
 
+## Project Structure
+
+```
+gen-ai-api-study/
+├── local_llm_sdk/              # Main Python package
+│   ├── __init__.py            # Package exports
+│   ├── client.py              # LocalLLMClient implementation
+│   ├── models.py              # Pydantic models (OpenAI spec)
+│   ├── tools/                 # Tool system
+│   │   ├── __init__.py
+│   │   ├── registry.py        # Tool registry and decorator
+│   │   └── builtin.py         # Built-in tools
+│   └── utils/                 # Utility functions
+├── notebooks/                  # Jupyter notebooks
+│   ├── api-hello-world-local.ipynb
+│   ├── tool-use-math-calculator.ipynb
+│   └── tool-use-simplified.ipynb
+├── .documentation/            # Research documentation
+├── setup.py                   # Package configuration
+├── requirements.txt           # Dependencies
+└── README.md                  # Project documentation
+```
+
 ## Common Development Tasks
 
-### Running Jupyter Notebooks
+### Installing the Package
 ```bash
-# Start Jupyter kernel
-jupyter notebook api-hello-world-local.ipynb
+# Install in development mode
+pip install -e .
 
-# Or use VS Code's Jupyter extension
-code api-hello-world-local.ipynb
+# Install dependencies
+pip install -r requirements.txt
 ```
 
-### Testing API Connections
+### Using the SDK
 ```python
-# Test LM Studio connection
-import requests
-base_url = "http://169.254.83.107:1234/v1"
-response = requests.get(f"{base_url}/models")
-print(response.json())
+from local_llm_sdk import LocalLLMClient, create_client
 
-# Test OpenAI connection (requires API key)
-from openai import OpenAI
-client = OpenAI()
-response = client.models.list()
+# Create client
+client = LocalLLMClient(
+    base_url="http://169.254.83.107:1234/v1",
+    model="your-model"
+)
+
+# Simple chat
+response = client.chat("Hello!")
 ```
 
-### Adding New API Examples
-1. Create Pydantic models for request/response validation
-2. Test endpoint with raw requests first
-3. Document differences from OpenAI implementation
-4. Add to comparison matrix in `lm_studio_openai_api_comparison.md`
+### Running Notebooks
+```bash
+# Navigate to notebooks directory
+cd notebooks/
+
+# Start Jupyter
+jupyter notebook
+```
+
+### Adding New Tools
+```python
+from local_llm_sdk import tool
+
+@tool("Description of your tool")
+def your_tool(param: str) -> dict:
+    return {"result": param.upper()}
+```
 
 ## Code Architecture
 
-### Repository Structure
-- **Root Level**: Main documentation and Jupyter notebooks
-- **`.documentation/`**: Research documents with citations and methodology
-- **Notebooks**: Interactive API testing and validation
+### Package Architecture
+- **`local_llm_sdk/`**: Main package with clean separation of concerns
+  - `client.py`: Main LocalLLMClient class
+  - `models.py`: Pydantic models following OpenAI spec
+  - `tools/`: Tool registration and execution system
+- **`notebooks/`**: Interactive examples and tutorials
+- **`.documentation/`**: Research documents with citations
 
-### Key Documents
-1. **`openai-api-documentation.md`**: Complete OpenAI API reference (31KB)
-2. **`lm_studio_openai_api_comparison.md`**: Detailed comparison with ~85% compatibility analysis (28KB)
-3. **`api-hello-world-local.ipynb`**: Working examples with Pydantic models for type safety
+### Key Components
+1. **LocalLLMClient**: Type-safe client with automatic tool handling
+2. **Tool System**: Decorator-based tool registration
+3. **Pydantic Models**: Full OpenAI API specification coverage
 
 ### Documentation Standards
 - All research includes source citations with timestamps
