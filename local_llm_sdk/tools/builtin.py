@@ -3,6 +3,7 @@ All registered tools for LM Studio.
 Just import this file and all tools are ready to use.
 """
 
+from typing import Literal
 from .registry import tool
 
 
@@ -18,7 +19,11 @@ def char_counter(text: str) -> dict:
 
 
 @tool("Perform mathematical calculations with two numbers")
-def math_calculator(arg1: float, arg2: float, operation: str) -> dict:
+def math_calculator(
+    arg1: float,
+    arg2: float,
+    operation: Literal["add", "subtract", "multiply", "divide"]
+) -> dict:
     """
     Calculate result of mathematical operation.
     Operations: add, subtract, multiply, divide
@@ -47,7 +52,7 @@ def math_calculator(arg1: float, arg2: float, operation: str) -> dict:
 
 
 @tool("Get the current weather for a city (mock data)")
-def get_weather(city: str, units: str = "celsius") -> dict:
+def get_weather(city: str, units: Literal["celsius", "fahrenheit"] = "celsius") -> dict:
     """Get mock weather data for demonstration."""
     # Mock data - in real app, would call weather API
     mock_weather = {
@@ -78,7 +83,7 @@ def get_weather(city: str, units: str = "celsius") -> dict:
 
 
 @tool("Convert text to uppercase or lowercase")
-def text_transformer(text: str, transform: str = "upper") -> dict:
+def text_transformer(text: str, transform: Literal["upper", "lower", "title"] = "upper") -> dict:
     """Transform text case."""
     if transform == "upper":
         result = text.upper()

@@ -65,11 +65,15 @@ class ToolRegistry:
                 # Simple extraction - could be enhanced
                 prop_schema["description"] = f"Parameter: {param_name}"
 
-            # Handle enums
-            if hasattr(param_type, "__args__") and len(param_type.__args__) > 0:
-                # For Literal types
-                if hasattr(param_type, "__origin__") and param_type.__origin__.__name__ == "Literal":
-                    prop_schema["enum"] = list(param_type.__args__)
+            # Handle enums and Literal types
+            if hasattr(param_type, "__args__"):
+                # Check if it's a Literal type
+                origin = getattr(param_type, "__origin__", None)
+                if origin is not None:
+                    # Handle typing.Literal
+                    origin_name = getattr(origin, "__name__", str(origin))
+                    if "Literal" in str(origin_name):
+                        prop_schema["enum"] = list(param_type.__args__)
 
             properties[param_name] = prop_schema
 

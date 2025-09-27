@@ -42,6 +42,7 @@ class LocalLLMClient:
         self.base_url = base_url.rstrip('/')
         self.default_model = model
         self.tools = ToolRegistry()
+        self.last_tool_calls = []  # Track tool calls from last request
 
         # API endpoints
         self.endpoints = {
@@ -115,6 +116,9 @@ class LocalLLMClient:
         Returns:
             String response (simple mode) or ChatCompletion object (detailed mode)
         """
+        # Clear tool calls from previous request
+        self.last_tool_calls = []
+
         # Convert string to messages if needed
         if isinstance(messages, str):
             messages = [
@@ -142,6 +146,8 @@ class LocalLLMClient:
 
         # Handle tool calls if present
         if response.choices[0].message.tool_calls and use_tools:
+            # Store tool calls before they're lost in the second request
+            self.last_tool_calls = response.choices[0].message.tool_calls
             response = self._handle_tool_calls(response, messages)
 
         # Return simple string or full response based on context
