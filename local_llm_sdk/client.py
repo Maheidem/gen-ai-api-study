@@ -266,7 +266,7 @@ def create_client(base_url: str = "http://localhost:1234/v1", model: str = None)
     return LocalLLMClient(base_url, model)
 
 
-def quick_chat(query: str, base_url: str = "http://localhost:1234/v1") -> str:
+def quick_chat(query: str, base_url: str = "http://localhost:1234/v1", model: str = "default") -> str:
     """Quick one-off chat without creating a client."""
-    client = LocalLLMClient(base_url)
+    client = LocalLLMClient(base_url, model)
     return client.chat_simple(query)
