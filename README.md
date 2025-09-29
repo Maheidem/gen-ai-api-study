@@ -118,8 +118,38 @@ local_llm_sdk/
 
 See the `notebooks/` directory for interactive examples:
 - `api-hello-world-local.ipynb` - Basic API usage
-- `tool-use-math-calculator.ipynb` - Detailed tool calling
-- `tool-use-simplified.ipynb` - Clean, simple examples
+- `react-agent-flow.ipynb` - **NEW!** ReACT agent with code execution and filesystem tools
+
+## ReACT Agent (NEW!)
+
+The SDK now includes a powerful **ReACT (Reasoning, Action, Observation)** agent that can solve complex, multi-step tasks autonomously:
+
+```python
+from local_llm_sdk import LocalLLMClient
+
+# Create client with built-in tools (including Python execution & filesystem)
+client = LocalLLMClient(base_url="http://localhost:1234/v1")
+client.register_tools_from(None)
+
+# Create ReACT agent
+from react_agent_flow import ReACTAgent  # From notebook
+agent = ReACTAgent(client, max_iterations=10)
+
+# Give it a complex task
+task = """
+Implement a sorting algorithm, test it, and benchmark
+against Python's built-in sort with different array sizes.
+Save all results to organized files.
+"""
+
+conversation = agent.think_and_act(task)
+```
+
+**New Tools Available:**
+- `execute_python` - Safe Python code execution with timeout
+- `filesystem_operation` - Create dirs, read/write files, list contents
+
+See `REACT_GUIDE.md` for detailed documentation and examples.
 
 ## Supported Servers
 

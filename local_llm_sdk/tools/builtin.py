@@ -99,3 +99,281 @@ def text_transformer(text: str, transform: Literal["upper", "lower", "title"] = 
         "transformed": result,
         "transform_type": transform
     }
+
+
+@tool("Execute Python code safely and return results")
+def execute_python(code: str, timeout: int = 30) -> dict:
+    """
+    Execute Python code in a subprocess and return the results.
+    Supports both expressions and statements with proper output capture.
+    """
+    import subprocess
+    import tempfile
+    import os
+    import sys
+    from pathlib import Path
+
+    try:
+        # Create a temporary file for the code
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.py', delete=False) as f:
+            # Wrap the code to capture stdout, stderr, and handle both expressions and statements
+            wrapper_code = f'''
+import sys
+import io
+import traceback
+import os
+
+# Redirect stdout and stderr
+old_stdout = sys.stdout
+old_stderr = sys.stderr
+stdout_capture = io.StringIO()
+stderr_capture = io.StringIO()
+sys.stdout = stdout_capture
+sys.stderr = stderr_capture
+
+# Change to a safe working directory
+import tempfile
+import os
+work_dir = tempfile.mkdtemp(prefix="python_exec_")
+os.chdir(work_dir)
+
+try:
+    # Execute the user code
+{chr(10).join("    " + line for line in code.split(chr(10)))}
+
+    # If we get here, execution was successful
+    execution_result = "success"
+except Exception as e:
+    # Capture any exception
+    execution_result = f"error: {{str(e)}}"
+    traceback.print_exc()
+
+finally:
+    # Restore stdout and stderr
+    sys.stdout = old_stdout
+    sys.stderr = old_stderr
+
+    # Print results as JSON for easy parsing
+    import json
+    result = {{
+        "stdout": stdout_capture.getvalue(),
+        "stderr": stderr_capture.getvalue(),
+        "status": execution_result,
+        "working_directory": work_dir
+    }}
+    print(json.dumps(result))
+'''
+            f.write(wrapper_code)
+            temp_file = f.name
+
+        # Execute the code with timeout
+        result = subprocess.run(
+            [sys.executable, temp_file],
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=tempfile.gettempdir()
+        )
+
+        # Clean up temp file
+        os.unlink(temp_file)
+
+        # Parse the JSON output from our wrapper
+        try:
+            import json
+            output_data = json.loads(result.stdout.strip().split('\n')[-1])
+
+            return {
+                "success": True,
+                "stdout": output_data["stdout"],
+                "stderr": output_data["stderr"],
+                "status": output_data["status"],
+                "working_directory": output_data["working_directory"],
+                "return_code": result.returncode
+            }
+        except (json.JSONDecodeError, IndexError):
+            # Fallback if JSON parsing fails
+            return {
+                "success": result.returncode == 0,
+                "stdout": result.stdout,
+                "stderr": result.stderr,
+                "status": "completed" if result.returncode == 0 else "error",
+                "return_code": result.returncode
+            }
+
+    except subprocess.TimeoutExpired:
+        if 'temp_file' in locals():
+            os.unlink(temp_file)
+        return {
+            "success": False,
+            "error": f"Code execution timed out after {timeout} seconds",
+            "stdout": "",
+            "stderr": "",
+            "status": "timeout"
+        }
+    except Exception as e:
+        if 'temp_file' in locals():
+            os.unlink(temp_file)
+        return {
+            "success": False,
+            "error": str(e),
+            "stdout": "",
+            "stderr": "",
+            "status": "error"
+        }
+
+
+@tool("Perform filesystem operations - create directories, read/write files, list contents")
+def filesystem_operation(
+    operation: Literal["create_dir", "write_file", "read_file", "list_dir", "delete_file", "check_exists"],
+    path: str,
+    content: str = "",
+    encoding: str = "utf-8"
+) -> dict:
+    """
+    Safely perform filesystem operations within the current working directory.
+    Operations: create_dir, write_file, read_file, list_dir, delete_file, check_exists
+    """
+    import os
+    from pathlib import Path
+
+    try:
+        # Convert to Path object for safer handling
+        file_path = Path(path)
+
+        # Security check: ensure we're working within current directory or subdirectories
+        cwd = Path.cwd()
+        try:
+            resolved_path = (cwd / file_path).resolve()
+            resolved_path.relative_to(cwd)
+        except ValueError:
+            return {
+                "success": False,
+                "error": f"Path '{path}' is outside the current working directory for security reasons"
+            }
+
+        if operation == "create_dir":
+            resolved_path.mkdir(parents=True, exist_ok=True)
+            return {
+                "success": True,
+                "message": f"Directory created: {resolved_path}",
+                "path": str(resolved_path)
+            }
+
+        elif operation == "write_file":
+            # Ensure parent directory exists
+            resolved_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(resolved_path, 'w', encoding=encoding) as f:
+                f.write(content)
+
+            return {
+                "success": True,
+                "message": f"File written: {resolved_path}",
+                "path": str(resolved_path),
+                "size": len(content.encode(encoding))
+            }
+
+        elif operation == "read_file":
+            if not resolved_path.exists():
+                return {
+                    "success": False,
+                    "error": f"File does not exist: {resolved_path}"
+                }
+
+            if resolved_path.is_dir():
+                return {
+                    "success": False,
+                    "error": f"Path is a directory, not a file: {resolved_path}"
+                }
+
+            with open(resolved_path, 'r', encoding=encoding) as f:
+                file_content = f.read()
+
+            return {
+                "success": True,
+                "content": file_content,
+                "path": str(resolved_path),
+                "size": len(file_content.encode(encoding))
+            }
+
+        elif operation == "list_dir":
+            if not resolved_path.exists():
+                return {
+                    "success": False,
+                    "error": f"Directory does not exist: {resolved_path}"
+                }
+
+            if not resolved_path.is_dir():
+                return {
+                    "success": False,
+                    "error": f"Path is not a directory: {resolved_path}"
+                }
+
+            items = []
+            for item in resolved_path.iterdir():
+                items.append({
+                    "name": item.name,
+                    "path": str(item),
+                    "type": "directory" if item.is_dir() else "file",
+                    "size": item.stat().st_size if item.is_file() else None
+                })
+
+            return {
+                "success": True,
+                "items": items,
+                "path": str(resolved_path),
+                "count": len(items)
+            }
+
+        elif operation == "delete_file":
+            if not resolved_path.exists():
+                return {
+                    "success": False,
+                    "error": f"File does not exist: {resolved_path}"
+                }
+
+            if resolved_path.is_dir():
+                return {
+                    "success": False,
+                    "error": f"Use rmdir for directories. Path is a directory: {resolved_path}"
+                }
+
+            resolved_path.unlink()
+            return {
+                "success": True,
+                "message": f"File deleted: {resolved_path}",
+                "path": str(resolved_path)
+            }
+
+        elif operation == "check_exists":
+            exists = resolved_path.exists()
+            file_type = None
+            if exists:
+                if resolved_path.is_file():
+                    file_type = "file"
+                elif resolved_path.is_dir():
+                    file_type = "directory"
+                else:
+                    file_type = "other"
+
+            return {
+                "success": True,
+                "exists": exists,
+                "type": file_type,
+                "path": str(resolved_path)
+            }
+
+        else:
+            return {
+                "success": False,
+                "error": f"Unknown operation: {operation}. Available: create_dir, write_file, read_file, list_dir, delete_file, check_exists"
+            }
+
+    except Exception as e:
+        return {
+            "success": False,
+            "error": str(e),
+            "operation": operation,
+            "path": path
+        }
