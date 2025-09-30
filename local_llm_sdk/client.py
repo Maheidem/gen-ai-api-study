@@ -391,15 +391,33 @@ class LocalLLMClient:
         # Execute each tool call
         for tool_call in response.choices[0].message.tool_calls:
             # Create a span for each tool execution
+            tool_args = json.loads(tool_call.function.arguments)
+
             with mlflow.start_span(
                 name=f"tool_{tool_call.function.name}",
-                span_type="TOOL"
+                span_type="TOOL",
+                attributes={
+                    "tool_name": tool_call.function.name,
+                    "tool_call_id": tool_call.id,
+                }
             ) as span:
+                # Log inputs to the span
+                if MLFLOW_AVAILABLE:
+                    span.set_inputs(tool_args)
+
                 # Execute tool
                 result = self.tools.execute(
                     tool_call.function.name,
-                    json.loads(tool_call.function.arguments)
+                    tool_args
                 )
+
+                # Log outputs to the span
+                if MLFLOW_AVAILABLE:
+                    try:
+                        result_dict = json.loads(result) if isinstance(result, str) else result
+                        span.set_outputs(result_dict)
+                    except:
+                        span.set_outputs({"result": result})
 
                 # Add tool response to conversation
                 tool_message = create_chat_message("tool", result)
