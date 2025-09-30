@@ -420,7 +420,7 @@ class TestAdvancedFeatures(LMStudioTestBase):
 
         response = self.client.chat(
             "What is the capital of Japan?",
-            return_full=True
+            return_full_response=True
         )
 
         assert isinstance(response, ChatCompletion)

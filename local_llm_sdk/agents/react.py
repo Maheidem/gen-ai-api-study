@@ -42,15 +42,26 @@ Tools:
 - filesystem_operation: Create/read/write files in project directory
 - math_calculator, text_transformer, char_counter, get_weather
 
-Instructions:
-1. Break tasks into focused steps
-2. Use multiple tool calls - each with single purpose
-3. execute_python for testing/computing → returns output
-4. filesystem_operation for file writes → saves to project
-5. Brief responses between tool calls
-6. Reply "TASK_COMPLETE" when done
+CRITICAL RULES:
+1. Use EXACTLY ONE tool per response - NEVER call multiple tools at once
+2. After EVERY tool call, wait for the result before deciding next step
+3. Break complex tasks into small, focused steps across multiple iterations
+4. Think step-by-step: explain → call tool → observe → explain → next tool
 
-Quality over speed. Correct tool usage over fewer iterations."""
+Instructions:
+- execute_python for testing/computing → returns output
+- filesystem_operation for file writes → saves to project
+- After each tool result, explain what you learned before next action
+- When task is complete, state the FINAL ANSWER clearly, then say TASK_COMPLETE
+
+Example (note: each line is a SEPARATE response after tool result):
+User: Calculate 5 factorial, convert to uppercase, count characters
+You: I'll calculate 5 factorial first. [calls math_calculator ONLY]
+You: Got 120. Now converting to uppercase... [calls text_transformer ONLY]
+You: Got "120". Now counting characters... [calls char_counter ONLY]
+You: The answer is: The text "120" has 3 characters. TASK_COMPLETE
+
+Quality over speed. ONE tool at a time. Multiple iterations expected."""
 
     def __init__(self, client, name: str = "ReACT", system_prompt: Optional[str] = None):
         """
@@ -109,7 +120,7 @@ Quality over speed. Correct tool usage over fewer iterations."""
                 response = self.client.chat(
                     messages=messages,
                     use_tools=True,
-                    return_full=True,
+                    return_full_response=True,
                     temperature=temperature
                 )
 
@@ -144,10 +155,13 @@ Quality over speed. Correct tool usage over fewer iterations."""
                         print(f"✓ Task completed successfully in {iteration + 1} iterations")
                         print(f"{'='*80}")
 
+                    # Extract final answer (remove TASK_COMPLETE marker)
+                    final_answer = self._extract_final_answer(content)
+
                     return AgentResult(
                         status=AgentStatus.SUCCESS,
                         iterations=iteration + 1,
-                        final_response=content,
+                        final_response=final_answer,
                         conversation=messages,
                         metadata={
                             "total_tool_calls": self._count_tool_calls(messages),
@@ -228,3 +242,25 @@ Quality over speed. Correct tool usage over fewer iterations."""
             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                 count += len(msg.tool_calls)
         return count
+
+    def _extract_final_answer(self, content: str) -> str:
+        """
+        Extract the final answer from content, removing TASK_COMPLETE marker.
+
+        Args:
+            content: The response content
+
+        Returns:
+            Cleaned final answer
+        """
+        import re
+
+        # Remove TASK_COMPLETE (case insensitive) and surrounding whitespace
+        cleaned = re.sub(r'\s*TASK_COMPLETE\s*$', '', content, flags=re.IGNORECASE)
+        cleaned = re.sub(r'\s*TASK_COMPLETE\s*', '', cleaned, flags=re.IGNORECASE)
+
+        # If nothing left after removing TASK_COMPLETE, return original
+        if not cleaned.strip():
+            return content
+
+        return cleaned.strip()

@@ -500,7 +500,7 @@ class TestConversationContinuity:
         ]
 
         # Make the chat call
-        response = mock_client.chat(messages, use_tools=True, return_full=True)
+        response = mock_client.chat(messages, use_tools=True, return_full_response=True)
 
         # Build complete conversation
         complete_conversation = messages + mock_client.last_conversation_additions

@@ -137,16 +137,39 @@ import os
 work_dir = tempfile.mkdtemp(prefix="python_exec_")
 os.chdir(work_dir)
 
+# Execute in a namespace to capture variables
+execution_namespace = {{}}
+
 try:
-    # Execute the user code
-{chr(10).join("    " + line for line in code.split(chr(10)))}
+    # Execute the user code in the namespace
+    exec("""
+{chr(10).join(line for line in code.split(chr(10)))}
+""", execution_namespace)
 
     # If we get here, execution was successful
     execution_result = "success"
+
+    # Capture result variables (look for common names or last assignment)
+    captured_result = None
+    result_var_names = ['result', 'answer', 'output', '_result', 'res']
+
+    for var_name in result_var_names:
+        if var_name in execution_namespace:
+            captured_result = execution_namespace[var_name]
+            break
+
+    # If no common name found, check if there's only one user-defined variable
+    if captured_result is None:
+        user_vars = {{k: v for k, v in execution_namespace.items()
+                     if not k.startswith('_') and k not in ['__builtins__']}}
+        if len(user_vars) == 1:
+            captured_result = list(user_vars.values())[0]
+
 except Exception as e:
     # Capture any exception
     execution_result = f"error: {{str(e)}}"
     traceback.print_exc()
+    captured_result = None
 
 finally:
     # Restore stdout and stderr
@@ -155,13 +178,22 @@ finally:
 
     # Print results as JSON for easy parsing
     import json
-    result = {{
+    result_data = {{
         "stdout": stdout_capture.getvalue(),
         "stderr": stderr_capture.getvalue(),
         "status": execution_result,
         "working_directory": work_dir
     }}
-    print(json.dumps(result))
+
+    # Add captured result if available
+    if captured_result is not None:
+        # Convert to string for JSON serialization
+        try:
+            result_data["captured_result"] = str(captured_result)
+        except:
+            result_data["captured_result"] = repr(captured_result)
+
+    print(json.dumps(result_data))
 '''
             f.write(wrapper_code)
             temp_file = f.name
@@ -183,7 +215,7 @@ finally:
             import json
             output_data = json.loads(result.stdout.strip().split('\n')[-1])
 
-            return {
+            result_dict = {
                 "success": True,
                 "stdout": output_data["stdout"],
                 "stderr": output_data["stderr"],
@@ -191,6 +223,12 @@ finally:
                 "working_directory": output_data["working_directory"],
                 "return_code": result.returncode
             }
+
+            # Include captured_result if present
+            if "captured_result" in output_data:
+                result_dict["captured_result"] = output_data["captured_result"]
+
+            return result_dict
         except (json.JSONDecodeError, IndexError):
             # Fallback if JSON parsing fails
             return {
@@ -241,16 +279,21 @@ def filesystem_operation(
         # Convert to Path object for safer handling
         file_path = Path(path)
 
-        # Security check: ensure we're working within current directory or subdirectories
-        cwd = Path.cwd()
-        try:
+        # Security check depends on whether path is absolute or relative
+        if file_path.is_absolute():
+            # Absolute paths: use directly (user explicitly provided full path)
+            resolved_path = file_path.resolve()
+        else:
+            # Relative paths: ensure they stay within current directory
+            cwd = Path.cwd()
             resolved_path = (cwd / file_path).resolve()
-            resolved_path.relative_to(cwd)
-        except ValueError:
-            return {
-                "success": False,
-                "error": f"Path '{path}' is outside the current working directory for security reasons"
-            }
+            try:
+                resolved_path.relative_to(cwd)
+            except ValueError:
+                return {
+                    "success": False,
+                    "error": f"Path '{path}' attempts to escape current working directory for security reasons"
+                }
 
         if operation == "create_dir":
             resolved_path.mkdir(parents=True, exist_ok=True)

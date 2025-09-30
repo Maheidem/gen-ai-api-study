@@ -1,0 +1,99 @@
+name: Behavioral Tests (Nightly)
+
+on:
+  schedule:
+    # Run nightly at 2:00 AM UTC
+    - cron: '0 2 * * *'
+  workflow_dispatch:  # Allow manual trigger
+    inputs:
+      test_type:
+        description: 'Test type to run'
+        required: true
+        default: 'behavioral'
+        type: choice
+        options:
+        - behavioral
+        - golden
+        - all
+
+jobs:
+  behavioral-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+        pip install -e .
+
+    # TODO: Set up local LLM server (LM Studio via Docker or mock)
+    # For now, this workflow documents the intended structure
+    # Actual implementation requires:
+    # 1. Docker container with LM Studio or Ollama
+    # 2. Model download and loading
+    # 3. Health check before running tests
+
+    - name: Wait for LLM server (placeholder)
+      run: |
+        echo "TODO: Implement LLM server startup"
+        echo "This would typically involve:"
+        echo "  1. Starting LM Studio/Ollama in Docker"
+        echo "  2. Loading a small model (e.g., Mistral-7B)"
+        echo "  3. Waiting for health check to pass"
+        echo "  4. Verifying model is loaded and responsive"
+        echo ""
+        echo "For now, behavioral tests should be run manually with:"
+        echo "  pytest tests/ -m 'live_llm and behavioral' -v"
+
+    - name: Run behavioral tests
+      if: github.event.inputs.test_type == 'behavioral' || github.event.inputs.test_type == 'all' || github.event_name == 'schedule'
+      run: |
+        # This will fail until LLM server is set up
+        # pytest tests/ -m "live_llm and behavioral" -v --tb=short || true
+        echo "Behavioral tests require LLM server setup"
+        echo "Run manually: pytest tests/ -m 'live_llm and behavioral' -v"
+
+    - name: Run golden dataset tests
+      if: github.event.inputs.test_type == 'golden' || github.event.inputs.test_type == 'all'
+      run: |
+        # This will fail until LLM server is set up
+        # pytest tests/ -m "live_llm and golden" -v --tb=short || true
+        echo "Golden dataset tests require LLM server setup"
+        echo "Run manually: pytest tests/ -m 'live_llm and golden' -v"
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: behavioral-test-results
+        path: |
+          .pytest_cache/
+          test-results/
+        retention-days: 30
+
+    # TODO: Add MLflow tracking integration
+    # - name: Upload metrics to MLflow
+    #   if: always()
+    #   run: |
+    #     echo "TODO: Upload test metrics to MLflow"
+    #     echo "Track: success rates, iteration counts, tool usage patterns"
+
+  notify-on-failure:
+    needs: behavioral-tests
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+    - name: Send notification
+      run: |
+        echo "Behavioral tests failed!"
+        echo "This indicates potential LLM behavioral regression"
+        # TODO: Add actual notification (Slack, email, etc.)

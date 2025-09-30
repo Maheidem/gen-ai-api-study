@@ -294,10 +294,10 @@ class TestThinkingIncludeParameter:
         assert response == "Test response"
 
     def test_include_thinking_with_return_full(self, mock_client, mock_requests_post, mock_response_with_thinking):
-        """Test include_thinking with return_full=True."""
+        """Test include_thinking with return_full_response=True."""
         mock_requests_post.return_value = mock_response_with_thinking
 
-        response = mock_client.chat("Hello", include_thinking=True, return_full=True)
+        response = mock_client.chat("Hello", include_thinking=True, return_full_response=True)
 
         # Should return ChatCompletion object with thinking included
         assert isinstance(response, ChatCompletion)

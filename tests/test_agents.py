@@ -162,7 +162,9 @@ class TestReACTAgent:
         # Verify result
         assert result.status == AgentStatus.SUCCESS
         assert result.iterations == 1
-        assert "TASK_COMPLETE" in result.final_response
+        # TASK_COMPLETE should be removed from final_response
+        assert "TASK_COMPLETE" not in result.final_response
+        assert "completed the task" in result.final_response
         assert result.success is True
         assert "agent_name" in result.metadata
         assert result.metadata["agent_name"] == "ReACT"
@@ -221,6 +223,7 @@ class TestReACTAgent:
 
         assert result.status == AgentStatus.SUCCESS
         assert result.iterations == 1
+        # CUSTOM_STOP should still be in final_response (only TASK_COMPLETE is removed)
         assert "CUSTOM_STOP" in result.final_response
 
     def test_react_agent_should_stop(self, mock_client):
@@ -360,3 +363,35 @@ class TestReACTAgent:
 
         assert "Starting task" in all_output or any("Starting" in str(c) for c in mock_print.call_args_list)
         assert result.success is True
+
+    def test_react_agent_extract_final_answer(self, mock_client):
+        """Test _extract_final_answer removes TASK_COMPLETE correctly."""
+        agent = ReACT(mock_client)
+
+        # Test with TASK_COMPLETE at end
+        result = agent._extract_final_answer("The answer is 42. TASK_COMPLETE")
+        assert result == "The answer is 42."
+        assert "TASK_COMPLETE" not in result
+
+        # Test with TASK_COMPLETE in middle
+        result = agent._extract_final_answer("The answer TASK_COMPLETE is 42")
+        assert "TASK_COMPLETE" not in result
+        assert "answer" in result and "42" in result
+
+        # Test with lowercase task_complete
+        result = agent._extract_final_answer("Done! task_complete")
+        assert result == "Done!"
+        assert "task_complete" not in result.lower()
+
+        # Test with mixed case
+        result = agent._extract_final_answer("Result: 120. Task_Complete")
+        assert result == "Result: 120."
+        assert "complete" not in result.lower()
+
+        # Test with just TASK_COMPLETE (edge case)
+        result = agent._extract_final_answer("TASK_COMPLETE")
+        assert result == "TASK_COMPLETE"  # Return original if nothing left
+
+        # Test with no TASK_COMPLETE
+        result = agent._extract_final_answer("Regular response without marker")
+        assert result == "Regular response without marker"

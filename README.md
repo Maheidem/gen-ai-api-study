@@ -95,11 +95,51 @@ print(f"Tokens used: {response.usage.total_tokens}")
 history = []
 
 # First message
-response, history = client.chat_with_history("Hello!", history)
+response, history = client.chat_with_history("My name is Alice.", history)
+print(response)  # "Hello Alice! How can I assist you today?"
 
-# Continue conversation
-response, history = client.chat_with_history("What's your name?", history)
+# Continue conversation - the LLM remembers!
+response, history = client.chat_with_history("What's my name?", history)
+print(response)  # "Your name is Alice!"
+
+# Inspect history (ChatMessage objects)
+for msg in history:
+    print(f"{msg.role}: {msg.content}")
 ```
+
+Learn more in `notebooks/03-conversation-history.ipynb`
+
+### Debugging Tool Calls
+
+```python
+# See which tools were called and their results
+response = client.chat("What is 127 * 893?")
+client.print_tool_calls()
+
+# Output:
+# 🔧 Tool Execution Summary (1 call):
+# ======================================================================
+#   [1] math_calculator(arg1=127, arg2=893, operation=multiply) → result=113411
+# ======================================================================
+
+# Use detailed=True for full JSON output
+client.print_tool_calls(detailed=True)
+```
+
+### Controlling Tool Usage
+
+```python
+# Let model decide (default)
+response = client.chat("Calculate 25 * 16", tool_choice="auto")
+
+# Force tool usage (bypasses reasoning for models like Magistral)
+response = client.chat("Calculate 25 * 16", tool_choice="required")
+
+# Prevent tool usage
+response = client.chat("Explain how to multiply", tool_choice="none")
+```
+
+**Note:** Reasoning models (Magistral, etc.) may skip tools for simple calculations when using `tool_choice="auto"`. Use `tool_choice="required"` to guarantee tool execution.
 
 ## Project Structure
 
@@ -114,42 +154,48 @@ local_llm_sdk/
 └── utils/              # Utility functions
 ```
 
-## Notebooks
+## 📚 Educational Notebooks
 
-See the `notebooks/` directory for interactive examples:
-- `api-hello-world-local.ipynb` - Basic API usage
-- `react-agent-flow.ipynb` - **NEW!** ReACT agent with code execution and filesystem tools
+The `notebooks/` directory contains a **progressive learning path** from beginner to advanced (total: ~3 hours):
 
-## ReACT Agent (NEW!)
+### Level 1: Foundations (30 min)
+- `01-installation-setup.ipynb` - Install SDK, connect to LM Studio, verify setup
+- `02-basic-chat.ipynb` - Simple chat, system prompts, temperature control
+- `03-conversation-history.ipynb` - Multi-turn conversations with context
 
-The SDK now includes a powerful **ReACT (Reasoning, Action, Observation)** agent that can solve complex, multi-step tasks autonomously:
+### Level 2: Core Features (45 min)
+- `04-tool-calling-basics.ipynb` - Using built-in tools (math, text, etc.)
+- `05-custom-tools.ipynb` - Creating your own tools with @tool decorator
+- `06-filesystem-code-execution.ipynb` - File I/O and code execution tools
 
-```python
-from local_llm_sdk import LocalLLMClient
+### Level 3: Advanced (60 min)
+- `07-react-agents.ipynb` - ReACT pattern for multi-step tasks
+- `08-mlflow-observability.ipynb` - Tracing and debugging with MLflow
+- `09-production-patterns.ipynb` - Error handling, retries, configuration
 
-# Create client with built-in tools (including Python execution & filesystem)
-client = LocalLLMClient(base_url="http://localhost:1234/v1")
-client.register_tools_from(None)
+### Level 4: Projects (60 min)
+- `10-mini-project-code-helper.ipynb` - Code review assistant agent
+- `11-mini-project-data-analyzer.ipynb` - Data analysis pipeline
 
-# Create ReACT agent
-from react_agent_flow import ReACTAgent  # From notebook
-agent = ReACTAgent(client, max_iterations=10)
+**Start with `01-installation-setup.ipynb` if you're new to the SDK!**
 
-# Give it a complex task
-task = """
-Implement a sorting algorithm, test it, and benchmark
-against Python's built-in sort with different array sizes.
-Save all results to organized files.
-"""
+## ReACT Agents
 
-conversation = agent.think_and_act(task)
-```
+The SDK includes a powerful **ReACT (Reasoning, Action, Observation)** pattern for building autonomous agents that can solve complex, multi-step tasks. Learn how to build ReACT agents in `notebooks/07-react-agents.ipynb`.
 
-**New Tools Available:**
-- `execute_python` - Safe Python code execution with timeout
-- `filesystem_operation` - Create dirs, read/write files, list contents
+**Key Capabilities:**
+- 🧠 **Multi-step reasoning** - Break down complex tasks into steps
+- 🛠️ **Tool execution** - Python code execution, file operations, calculations
+- 🔄 **Iterative problem solving** - Observe results and adjust approach
+- 📊 **Self-correction** - Detect and fix errors autonomously
 
-See `REACT_GUIDE.md` for detailed documentation and examples.
+**Example use cases covered in notebook 07:**
+- Data analysis pipelines
+- Code generation and testing
+- File processing workflows
+- Research and information gathering
+
+See `notebooks/07-react-agents.ipynb` for complete tutorials and examples.
 
 ## Supported Servers
 

@@ -168,6 +168,103 @@ class LocalLLMClient:
 
         return self
 
+    def register_tools(self, tools: List[callable]) -> 'LocalLLMClient':
+        """
+        Register multiple tools at once from a list of functions.
+
+        Args:
+            tools: List of callable functions to register as tools
+
+        Usage:
+            def add(a: float, b: float) -> dict:
+                \"\"\"Add two numbers\"\"\"
+                return {"result": a + b}
+
+            def multiply(a: float, b: float) -> dict:
+                \"\"\"Multiply two numbers\"\"\"
+                return {"result": a * b}
+
+            client.register_tools([add, multiply])
+        """
+        for func in tools:
+            # Use the function's docstring as description
+            description = func.__doc__ or f"Function: {func.__name__}"
+            description = description.strip()
+
+            # Manually register the function
+            self.tools._tools[func.__name__] = func
+            schema = self.tools._generate_schema(func, description)
+            self.tools._schemas.append(schema)
+
+        return self
+
+    def print_tool_calls(self, detailed: bool = False):
+        """
+        Print a summary of tool calls from the last chat request.
+
+        Args:
+            detailed: If True, show full arguments and results. If False, show summary only.
+
+        Usage:
+            response = client.chat("What is 5 * 10?")
+            client.print_tool_calls()  # Shows: "🔧 Called math_calculator(arg1=5, arg2=10, operation=multiply) → result=50"
+        """
+        if not self.last_tool_calls:
+            print("ℹ️  No tools were called in the last request")
+            return
+
+        print(f"\n🔧 Tool Execution Summary ({len(self.last_tool_calls)} call{'s' if len(self.last_tool_calls) > 1 else ''}):")
+        print("=" * 70)
+
+        for i, tool_call in enumerate(self.last_tool_calls, 1):
+            func_name = tool_call.function.name
+
+            # Parse arguments
+            import json
+            try:
+                args = json.loads(tool_call.function.arguments)
+            except:
+                args = tool_call.function.arguments
+
+            # Find the result from conversation additions
+            result = None
+            for msg in self.last_conversation_additions:
+                if hasattr(msg, 'tool_call_id') and msg.tool_call_id == tool_call.id:
+                    try:
+                        result = json.loads(msg.content)
+                    except:
+                        result = msg.content
+                    break
+
+            # Format output
+            if detailed:
+                print(f"\n[{i}] {func_name}")
+                print(f"    Arguments: {json.dumps(args, indent=6)}")
+                if result:
+                    print(f"    Result: {json.dumps(result, indent=6)}")
+            else:
+                # Compact format
+                args_str = ", ".join(f"{k}={v}" for k, v in args.items()) if isinstance(args, dict) else str(args)
+                result_str = ""
+                if result and isinstance(result, dict):
+                    # Show the most relevant result field (priority order)
+                    if 'captured_result' in result:
+                        result_str = f" → captured_result={result['captured_result']}"
+                    elif 'result' in result:
+                        result_str = f" → result={result['result']}"
+                    elif 'error' in result:
+                        result_str = f" → ❌ {result['error']}"
+                    elif 'success' in result and not result['success']:
+                        result_str = f" → success=False"
+                    else:
+                        # Show first key-value pair
+                        key, val = next(iter(result.items()))
+                        result_str = f" → {key}={val}"
+
+                print(f"  [{i}] {func_name}({args_str}){result_str}")
+
+        print("=" * 70 + "\n")
+
     def _extract_thinking(self, content: str) -> tuple[str, str]:
         """
         Extract thinking blocks from model content.
@@ -255,8 +352,9 @@ class LocalLLMClient:
         temperature: float = 0.7,
         max_tokens: int = None,
         use_tools: bool = True,
+        tool_choice: str = "auto",
         stream: bool = False,
-        return_full: bool = False,
+        return_full_response: bool = False,
         include_thinking: bool = False,
         **kwargs
     ) -> Union[str, ChatCompletion]:
@@ -269,8 +367,10 @@ class LocalLLMClient:
             temperature: Sampling temperature
             max_tokens: Maximum tokens to generate
             use_tools: Whether to include registered tools
+            tool_choice: Control tool usage: "auto" (model decides), "required" (force tool use),
+                        "none" (no tools), or dict with {"type": "function", "function": {"name": "tool_name"}}
             stream: Whether to stream the response
-            return_full: Force returning full ChatCompletion object
+            return_full_response: Force returning full ChatCompletion object instead of just content string
             include_thinking: Whether to include thinking blocks in response
             **kwargs: Additional parameters for ChatCompletionRequest.
                      Special kwargs when messages is a string:
@@ -278,14 +378,21 @@ class LocalLLMClient:
 
         Returns:
             String response (simple mode) or ChatCompletion object (detailed mode)
+
+        Note:
+            For reasoning models (like Magistral), use tool_choice="required" to force immediate tool usage
+            and bypass internal reasoning. This prevents the model from solving simple problems mentally.
         """
         # Clear tool calls, thinking, and conversation additions from previous request
         self.last_tool_calls = []
         self.last_thinking = ""
         self.last_conversation_additions = []
 
+        # Track if original input was a simple string (for return type decision)
+        was_simple_string = isinstance(messages, str)
+
         # Convert string to messages if needed
-        if isinstance(messages, str):
+        if was_simple_string:
             # Extract system prompt from kwargs if provided, otherwise use default
             system_prompt = kwargs.pop('system', "You are a helpful assistant with access to tools.")
             messages = [
@@ -314,7 +421,7 @@ class LocalLLMClient:
         # Add tools if available and requested
         if use_tools and self.tools.list_tools():
             request.tools = self.tools.get_schemas()
-            request.tool_choice = "auto"
+            request.tool_choice = tool_choice
 
         # Send request
         response = self._send_request(request)
@@ -372,11 +479,15 @@ class LocalLLMClient:
                 response.choices[0].message.content = f"**Thinking:**\n{self.last_thinking}"
 
         # Return simple string or full response based on context
-        if not return_full and (isinstance(messages[0], str) or len(messages) <= 2):
-            # Simple mode: return just the content
+        if return_full_response:
+            # User explicitly requested full response
+            return response
+        elif was_simple_string or len(messages) <= 2:
+            # Simple string input OR short conversation (system+user) -> return simple string output
+            # This maintains backward compatibility for simple use cases
             return response.choices[0].message.content
         else:
-            # Advanced mode: return full ChatCompletion
+            # Complex message list input -> return full ChatCompletion for programmatic use
             return response
 
     @mlflow.trace(name="send_request", span_type="LLM")

@@ -1,0 +1,237 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "description": "Golden dataset for LLM behavioral regression testing. These are known-good task examples that should consistently work.",
+  "version": "1.0.0",
+  "last_updated": "2025-09-30",
+
+  "react_agent": {
+    "multi_tool_tasks": [
+      {
+        "id": "factorial_uppercase_count",
+        "task": "Calculate 5 factorial, convert the result to uppercase text, then count the characters",
+        "description": "Classic multi-step task requiring 3 different tools in sequence",
+        "expected_properties": {
+          "min_iterations": 2,
+          "max_iterations": 10,
+          "min_tool_calls": 3,
+          "tools_used": ["math_calculator", "text_transformer", "char_counter"],
+          "final_response_contains": ["120", "3"],
+          "final_response_excludes": ["TASK_COMPLETE", "task_complete"]
+        },
+        "difficulty": "medium",
+        "tags": ["math", "text_processing", "multi_step"]
+      },
+      {
+        "id": "file_write_read",
+        "task": "Write 'Hello, Behavioral Testing!' to /tmp/golden_test.txt, then read it back and confirm the content",
+        "description": "Tests filesystem operations in sequence",
+        "expected_properties": {
+          "min_iterations": 2,
+          "max_iterations": 8,
+          "min_tool_calls": 2,
+          "tools_used": ["filesystem_operation"],
+          "final_response_contains": ["Hello, Behavioral Testing!"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "medium",
+        "tags": ["filesystem", "io", "multi_step"]
+      },
+      {
+        "id": "python_factorial_transform",
+        "task": "Write Python code to calculate factorial of 8, then convert the result to a string and count its length",
+        "description": "Combines Python execution with text processing",
+        "expected_properties": {
+          "min_iterations": 2,
+          "max_iterations": 10,
+          "min_tool_calls": 3,
+          "tools_used": ["execute_python", "text_transformer", "char_counter"],
+          "final_response_contains": ["40320", "5"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "medium",
+        "tags": ["python", "math", "text_processing"]
+      },
+      {
+        "id": "weather_math_text",
+        "task": "Get the weather for London, calculate 20 + 30, then convert the result to uppercase",
+        "description": "Tests different tool types in sequence",
+        "expected_properties": {
+          "min_iterations": 2,
+          "max_iterations": 12,
+          "min_tool_calls": 3,
+          "tools_used": ["get_weather", "math_calculator", "text_transformer"],
+          "final_response_contains": ["50"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "medium",
+        "tags": ["weather", "math", "text_processing", "multi_domain"]
+      }
+    ],
+
+    "single_tool_tasks": [
+      {
+        "id": "simple_addition",
+        "task": "What is 42 + 58?",
+        "description": "Basic arithmetic - should complete in 1-2 iterations",
+        "expected_properties": {
+          "min_iterations": 1,
+          "max_iterations": 3,
+          "min_tool_calls": 1,
+          "tools_used": ["math_calculator"],
+          "final_response_contains": ["100"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "easy",
+        "tags": ["math", "simple"]
+      },
+      {
+        "id": "simple_multiplication",
+        "task": "Calculate 12 multiplied by 8",
+        "description": "Basic multiplication - efficiency test",
+        "expected_properties": {
+          "min_iterations": 1,
+          "max_iterations": 3,
+          "min_tool_calls": 1,
+          "tools_used": ["math_calculator"],
+          "final_response_contains": ["96"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "easy",
+        "tags": ["math", "simple"]
+      },
+      {
+        "id": "text_uppercase",
+        "task": "Convert the text 'hello world' to uppercase",
+        "description": "Simple text transformation",
+        "expected_properties": {
+          "min_iterations": 1,
+          "max_iterations": 3,
+          "min_tool_calls": 1,
+          "tools_used": ["text_transformer"],
+          "final_response_contains": ["HELLO WORLD"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "easy",
+        "tags": ["text_processing", "simple"]
+      },
+      {
+        "id": "count_characters",
+        "task": "How many characters are in 'Testing123'?",
+        "description": "Simple character counting",
+        "expected_properties": {
+          "min_iterations": 1,
+          "max_iterations": 3,
+          "min_tool_calls": 1,
+          "tools_used": ["char_counter"],
+          "final_response_contains": ["10"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "easy",
+        "tags": ["text_processing", "simple"]
+      },
+      {
+        "id": "python_factorial",
+        "task": "Use Python to calculate the factorial of 10",
+        "description": "Python execution with result capture",
+        "expected_properties": {
+          "min_iterations": 1,
+          "max_iterations": 3,
+          "min_tool_calls": 1,
+          "tools_used": ["execute_python"],
+          "final_response_contains": ["3628800"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "easy",
+        "tags": ["python", "math", "simple"]
+      }
+    ],
+
+    "complex_tasks": [
+      {
+        "id": "fibonacci_analysis",
+        "task": "Write Python code to calculate the first 10 Fibonacci numbers, save them to /tmp/fib.txt, then read the file and count how many characters it contains",
+        "description": "Complex multi-step task with Python, filesystem, and text processing",
+        "expected_properties": {
+          "min_iterations": 3,
+          "max_iterations": 15,
+          "min_tool_calls": 3,
+          "tools_used": ["execute_python", "filesystem_operation", "char_counter"],
+          "final_response_contains": [],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "hard",
+        "tags": ["python", "filesystem", "text_processing", "multi_step", "complex"]
+      },
+      {
+        "id": "math_chain",
+        "task": "Calculate (15 + 25) * 2, then divide by 4, then subtract 10",
+        "description": "Chain of mathematical operations",
+        "expected_properties": {
+          "min_iterations": 2,
+          "max_iterations": 12,
+          "min_tool_calls": 3,
+          "tools_used": ["math_calculator"],
+          "final_response_contains": ["10"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "medium",
+        "tags": ["math", "multi_step", "chaining"]
+      }
+    ],
+
+    "edge_cases": [
+      {
+        "id": "very_large_number",
+        "task": "Calculate 2 to the power of 100",
+        "description": "Tests handling of very large numbers",
+        "expected_properties": {
+          "min_iterations": 1,
+          "max_iterations": 5,
+          "min_tool_calls": 1,
+          "tools_used": ["math_calculator"],
+          "final_response_contains": ["1267650600228229401496703205376"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "medium",
+        "tags": ["math", "edge_case", "large_numbers"]
+      },
+      {
+        "id": "empty_string",
+        "task": "Count the characters in an empty string ''",
+        "description": "Tests handling of edge case inputs",
+        "expected_properties": {
+          "min_iterations": 1,
+          "max_iterations": 3,
+          "min_tool_calls": 1,
+          "tools_used": ["char_counter"],
+          "final_response_contains": ["0"],
+          "final_response_excludes": ["TASK_COMPLETE"]
+        },
+        "difficulty": "easy",
+        "tags": ["text_processing", "edge_case"]
+      }
+    ]
+  },
+
+  "metadata": {
+    "total_tasks": 16,
+    "categories": {
+      "multi_tool_tasks": 4,
+      "single_tool_tasks": 5,
+      "complex_tasks": 2,
+      "edge_cases": 2
+    },
+    "difficulty_distribution": {
+      "easy": 6,
+      "medium": 8,
+      "hard": 1
+    },
+    "usage_notes": [
+      "Run these tests weekly or before releases",
+      "Success rate threshold: ≥90% for single_tool_tasks, ≥80% for multi_tool_tasks, ≥70% for complex_tasks",
+      "Tests should use property-based assertions, not exact matching",
+      "Update this dataset when discovering new edge cases or fixing bugs",
+      "Each task should be runnable independently"
+    ]
+  }
+}

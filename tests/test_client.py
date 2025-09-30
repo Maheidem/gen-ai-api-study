@@ -238,10 +238,10 @@ class TestLocalLLMClientChat:
         assert response == expected
 
     def test_chat_return_full_true(self, mock_client, mock_requests_post, mock_response_with_content):
-        """Test chat with return_full=True."""
+        """Test chat with return_full_response=True."""
         mock_requests_post.return_value = mock_response_with_content
 
-        response = mock_client.chat("Hello", return_full=True)
+        response = mock_client.chat("Hello", return_full_response=True)
 
         # Should return ChatCompletion object
         assert isinstance(response, ChatCompletion)
@@ -258,6 +258,88 @@ class TestLocalLLMClientChat:
 
         assert request_data["temperature"] == 0.5
         assert request_data["max_tokens"] == 100
+
+
+class TestLocalLLMClientToolChoice:
+    """Test tool_choice parameter functionality."""
+
+    def test_tool_choice_auto(self, mock_client, mock_requests_post, mock_response_with_content):
+        """Test tool_choice='auto' (default behavior)."""
+        mock_requests_post.return_value = mock_response_with_content
+        mock_client.register_tools_from(None)
+
+        mock_client.chat("Hello", use_tools=True, tool_choice="auto")
+
+        call_args = mock_requests_post.call_args
+        request_data = call_args[1]["json"]
+
+        assert "tools" in request_data
+        assert request_data["tool_choice"] == "auto"
+
+    def test_tool_choice_required(self, mock_client, mock_requests_post, mock_response_with_content):
+        """Test tool_choice='required' forces tool usage."""
+        mock_requests_post.return_value = mock_response_with_content
+        mock_client.register_tools_from(None)
+
+        mock_client.chat("Calculate 5 * 10", use_tools=True, tool_choice="required")
+
+        call_args = mock_requests_post.call_args
+        request_data = call_args[1]["json"]
+
+        assert "tools" in request_data
+        assert request_data["tool_choice"] == "required"
+
+    def test_tool_choice_none(self, mock_client, mock_requests_post, mock_response_with_content):
+        """Test tool_choice='none' prevents tool usage."""
+        mock_requests_post.return_value = mock_response_with_content
+        mock_client.register_tools_from(None)
+
+        mock_client.chat("Explain math", use_tools=True, tool_choice="none")
+
+        call_args = mock_requests_post.call_args
+        request_data = call_args[1]["json"]
+
+        assert "tools" in request_data
+        assert request_data["tool_choice"] == "none"
+
+    def test_tool_choice_specific_function(self, mock_client, mock_requests_post, mock_response_with_content):
+        """Test tool_choice with specific function."""
+        mock_requests_post.return_value = mock_response_with_content
+        mock_client.register_tools_from(None)
+
+        specific_tool = {"type": "function", "function": {"name": "math_calculator"}}
+        mock_client.chat("Calculate", use_tools=True, tool_choice=specific_tool)
+
+        call_args = mock_requests_post.call_args
+        request_data = call_args[1]["json"]
+
+        assert "tools" in request_data
+        assert request_data["tool_choice"] == specific_tool
+
+    def test_tool_choice_default_is_auto(self, mock_client, mock_requests_post, mock_response_with_content):
+        """Test that default tool_choice is 'auto'."""
+        mock_requests_post.return_value = mock_response_with_content
+        mock_client.register_tools_from(None)
+
+        mock_client.chat("Hello", use_tools=True)
+
+        call_args = mock_requests_post.call_args
+        request_data = call_args[1]["json"]
+
+        assert request_data["tool_choice"] == "auto"
+
+    def test_tool_choice_without_tools(self, mock_client, mock_requests_post, mock_response_with_content):
+        """Test that tool_choice is ignored when use_tools=False."""
+        mock_requests_post.return_value = mock_response_with_content
+
+        mock_client.chat("Hello", use_tools=False, tool_choice="required")
+
+        call_args = mock_requests_post.call_args
+        request_data = call_args[1]["json"]
+
+        # Should not include tools or tool_choice when use_tools=False
+        assert "tools" not in request_data
+        assert "tool_choice" not in request_data
 
 
 class TestLocalLLMClientChatSimple:
@@ -437,3 +519,151 @@ class TestLocalLLMClientNewFeatures:
         """Test client has react() convenience method for agents."""
         assert hasattr(mock_client, 'react')
         assert callable(mock_client.react)
+
+
+class TestLocalLLMClientRegisterTools:
+    """Test register_tools() method for registering tools from a list."""
+
+    def test_register_single_tool_from_list(self, mock_client):
+        """Test registering a single tool via list."""
+        def test_func(x: int) -> dict:
+            """Test function"""
+            return {"result": x * 2}
+
+        # Register the tool
+        result = mock_client.register_tools([test_func])
+
+        # Should return client for chaining
+        assert result is mock_client
+
+        # Tool should be registered
+        assert "test_func" in mock_client.tools.list_tools()
+
+        # Should have schema
+        schemas = mock_client.tools.get_schemas()
+        assert len(schemas) == 1
+        assert schemas[0].function.name == "test_func"
+        assert schemas[0].function.description == "Test function"
+
+    def test_register_multiple_tools_from_list(self, mock_client):
+        """Test registering multiple tools at once."""
+        def add(a: float, b: float) -> dict:
+            """Add two numbers"""
+            return {"result": a + b}
+
+        def multiply(a: float, b: float) -> dict:
+            """Multiply two numbers"""
+            return {"result": a * b}
+
+        def divide(a: float, b: float) -> dict:
+            """Divide two numbers"""
+            return {"result": a / b if b != 0 else None}
+
+        # Register all tools
+        tools = [add, multiply, divide]
+        mock_client.register_tools(tools)
+
+        # All should be registered
+        registered = mock_client.tools.list_tools()
+        assert "add" in registered
+        assert "multiply" in registered
+        assert "divide" in registered
+
+        # Should have 3 schemas
+        schemas = mock_client.tools.get_schemas()
+        assert len(schemas) == 3
+
+    def test_registered_tools_are_executable(self, mock_client):
+        """Test that tools registered via list are executable."""
+        def square(x: float) -> dict:
+            """Calculate square"""
+            return {"result": x ** 2}
+
+        mock_client.register_tools([square])
+
+        # Execute the tool
+        result_json = mock_client.tools.execute("square", {"x": 5})
+        result = json.loads(result_json)
+
+        assert result["success"] is True
+        assert result["result"] == 25
+
+    def test_register_tools_with_no_docstring(self, mock_client):
+        """Test registering tools without docstrings."""
+        def no_doc(x: int) -> dict:
+            return {"result": x}
+
+        mock_client.register_tools([no_doc])
+
+        schemas = mock_client.tools.get_schemas()
+        assert len(schemas) == 1
+        # Should use function name as description
+        assert schemas[0].function.description == "Function: no_doc"
+
+    def test_register_tools_with_optional_params(self, mock_client):
+        """Test registering tools with optional parameters."""
+        def greet(name: str, greeting: str = "Hello") -> dict:
+            """Greet someone"""
+            return {"message": f"{greeting}, {name}!"}
+
+        mock_client.register_tools([greet])
+
+        schemas = mock_client.tools.get_schemas()
+        params = schemas[0].function.parameters
+
+        # Should have both parameters
+        assert "name" in params["properties"]
+        assert "greeting" in params["properties"]
+
+        # Only name should be required
+        assert "name" in params["required"]
+        assert "greeting" not in params["required"]
+
+    def test_register_empty_list(self, mock_client):
+        """Test registering empty list doesn't fail."""
+        result = mock_client.register_tools([])
+
+        # Should return client (for chaining)
+        assert result is mock_client
+
+        # No tools should be added
+        assert len(mock_client.tools.list_tools()) == 0
+
+    def test_register_tools_preserves_existing(self, mock_client):
+        """Test that register_tools doesn't remove existing tools."""
+        def first_tool(x: int) -> dict:
+            """First tool"""
+            return {"result": x}
+
+        def second_tool(y: int) -> dict:
+            """Second tool"""
+            return {"result": y * 2}
+
+        # Register first tool
+        mock_client.register_tools([first_tool])
+        assert len(mock_client.tools.list_tools()) == 1
+
+        # Register second tool
+        mock_client.register_tools([second_tool])
+
+        # Both should exist
+        registered = mock_client.tools.list_tools()
+        assert len(registered) == 2
+        assert "first_tool" in registered
+        assert "second_tool" in registered
+
+    def test_register_tools_method_chaining(self, mock_client):
+        """Test that register_tools supports method chaining."""
+        def tool1(x: int) -> dict:
+            return {"result": x}
+
+        def tool2(x: int) -> dict:
+            return {"result": x * 2}
+
+        # Should support chaining
+        result = (mock_client
+                  .register_tools([tool1])
+                  .register_tools([tool2]))
+
+        assert result is mock_client
+        assert len(mock_client.tools.list_tools()) == 2
