@@ -28,6 +28,19 @@ The repository follows a structured research methodology:
 - **Base URL**: `http://169.254.83.107:1234/v1` (local network)
 - **Authentication**: Fixed key "lm-studio"
 - **Available Models**: Check via `/v1/models` endpoint
+- **Server Logs**: `/mnt/c/Users/mahei/.cache/lm-studio/server-logs` (organized by year-month)
+
+#### Debugging with LM Studio Logs
+```bash
+# Check latest logs
+ls -lt /mnt/c/Users/mahei/.cache/lm-studio/server-logs/$(date +%Y-%m)/ | head
+
+# Search for errors
+grep -r "error" /mnt/c/Users/mahei/.cache/lm-studio/server-logs/$(date +%Y-%m)/
+
+# Follow live logs
+tail -f /mnt/c/Users/mahei/.cache/lm-studio/server-logs/$(date +%Y-%m)/*.log
+```
 
 ## Project Structure
 

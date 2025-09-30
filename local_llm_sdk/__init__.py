@@ -42,6 +42,10 @@ from .models import (
 # Tool system
 from .tools import ToolRegistry, tool
 
+# Agent system
+from . import agents
+from .agents import ReACT, BaseAgent, AgentResult, AgentStatus
+
 # Convenience re-export
 Client = LocalLLMClient
 
@@ -101,6 +105,13 @@ __all__ = [
     # Tools
     "ToolRegistry",
     "tool",
+
+    # Agents
+    "agents",
+    "ReACT",
+    "BaseAgent",
+    "AgentResult",
+    "AgentStatus",
 
     # Constants
     "OPENAI_MODELS",

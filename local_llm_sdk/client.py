@@ -6,6 +6,7 @@ Combines api_models, tools, and provides a clean interface.
 import requests
 import json
 from typing import List, Optional, Dict, Any, Union
+from contextlib import contextmanager
 
 # MLflow tracing support (optional, graceful degradation)
 try:
@@ -62,7 +63,8 @@ class LocalLLMClient:
                      Falls back to LLM_BASE_URL env var or "http://localhost:1234/v1"
             model: Default model to use. Use "auto" to automatically detect the first available model,
                    or specify a model name explicitly. Falls back to LLM_MODEL env var or "auto"
-            timeout: Request timeout in seconds. Falls back to LLM_TIMEOUT env var or 30
+            timeout: Request timeout in seconds. Falls back to LLM_TIMEOUT env var or 300.
+                     Local models may need longer timeouts (120-600s) for complex tasks
         """
         from .config import get_default_config
 
@@ -76,6 +78,7 @@ class LocalLLMClient:
         self.tools = ToolRegistry()
         self.last_tool_calls = []  # Track tool calls from last request
         self.last_thinking = ""  # Track thinking blocks from last request
+        self.last_conversation_additions = []  # Track additional messages from tool execution
 
         # API endpoints
         self.endpoints = {
@@ -100,6 +103,34 @@ class LocalLLMClient:
                 print(f"⚠ Warning: Could not auto-detect model ({str(e)}). You'll need to specify model per request.")
         else:
             self.default_model = model
+
+    @contextmanager
+    def conversation(self, name: str = "conversation"):
+        """
+        Context manager for multi-turn conversations with unified tracing.
+
+        Groups multiple chat() calls under a single parent trace for better observability
+        in MLflow. This is useful for agent loops, chat sessions, or any multi-turn interaction.
+
+        Args:
+            name: Name for the conversation trace (default: "conversation")
+
+        Usage:
+            with client.conversation("react-agent-task"):
+                for i in range(10):
+                    response = client.chat(messages, use_tools=True)
+                    messages.append(response.choices[0].message)
+
+        This creates a hierarchy in MLflow:
+            conversation
+            ├─ chat (iteration 1)
+            │  ├─ send_request
+            │  └─ handle_tool_calls
+            ├─ chat (iteration 2)
+            ...
+        """
+        with mlflow.start_span(name=name, span_type="CHAIN"):
+            yield self
 
     def register_tool(self, description: str = ""):
         """
@@ -246,9 +277,10 @@ class LocalLLMClient:
         Returns:
             String response (simple mode) or ChatCompletion object (detailed mode)
         """
-        # Clear tool calls and thinking from previous request
+        # Clear tool calls, thinking, and conversation additions from previous request
         self.last_tool_calls = []
         self.last_thinking = ""
+        self.last_conversation_additions = []
 
         # Convert string to messages if needed
         if isinstance(messages, str):
@@ -298,7 +330,12 @@ class LocalLLMClient:
             if first_thinking:
                 self.last_thinking = first_thinking
 
-            response = self._handle_tool_calls(response, messages)
+            # Get both response and full conversation state
+            response, full_conversation_messages = self._handle_tool_calls(response, messages)
+
+            # Store the additional messages that were created during tool execution
+            # These are: assistant_with_tool_calls + tool_result_messages + final_assistant
+            self.last_conversation_additions = full_conversation_messages[len(messages):]
 
         # Extract thinking blocks from final response content
         content = response.choices[0].message.content or ""
@@ -379,8 +416,15 @@ class LocalLLMClient:
         self,
         response: ChatCompletion,
         original_messages: List[ChatMessage]
-    ) -> ChatCompletion:
-        """Handle tool calls and get final response."""
+    ) -> tuple[ChatCompletion, List[ChatMessage]]:
+        """
+        Handle tool calls and get final response with full conversation state.
+
+        Returns:
+            tuple: (final_response, complete_messages_list)
+                - final_response: The ChatCompletion after tool execution
+                - complete_messages_list: Full conversation including tool results
+        """
         # Store original tool calls to preserve them
         original_tool_calls = response.choices[0].message.tool_calls
 
@@ -437,7 +481,9 @@ class LocalLLMClient:
         # This allows tracking and observability even after automatic tool execution
         final_response.choices[0].message.tool_calls = original_tool_calls
 
-        return final_response
+        # Return both the response and the complete conversation state
+        # The messages list includes: original + assistant_with_tools + tool_results + final_assistant
+        return final_response, messages
 
     def embeddings(
         self,
@@ -511,6 +557,55 @@ class LocalLLMClient:
         else:
             new_history.append(create_chat_message("assistant", response))
             return response, new_history
+
+    def react(
+        self,
+        task: str,
+        max_iterations: int = 15,
+        stop_condition: callable = None,
+        temperature: float = 0.7,
+        verbose: bool = True,
+        **kwargs
+    ):
+        """
+        Run a ReACT (Reasoning + Acting) agent for the given task.
+
+        This is a convenience method that creates and runs a ReACT agent.
+        The agent will use tools to accomplish the task through iterative
+        reasoning and acting cycles.
+
+        Args:
+            task: The task description/prompt
+            max_iterations: Maximum number of iterations (default: 15)
+            stop_condition: Optional function that returns True when done
+            temperature: Sampling temperature (default: 0.7)
+            verbose: Whether to print progress (default: True)
+            **kwargs: Additional arguments passed to the agent
+
+        Returns:
+            AgentResult with execution details
+
+        Example:
+            result = client.react(
+                task="Implement a sorting algorithm",
+                max_iterations=15
+            )
+
+            if result.success:
+                print(f"Completed in {result.iterations} iterations")
+                print(result.final_response)
+        """
+        from .agents import ReACT
+
+        agent = ReACT(self)
+        return agent.run(
+            task=task,
+            max_iterations=max_iterations,
+            stop_condition=stop_condition,
+            temperature=temperature,
+            verbose=verbose,
+            **kwargs
+        )
 
     def __repr__(self) -> str:
         tools_count = len(self.tools.list_tools())

@@ -15,7 +15,7 @@ def get_default_config() -> Dict[str, Any]:
     Environment Variables:
         LLM_BASE_URL: Base URL for the local LLM API (default: http://localhost:1234/v1)
         LLM_MODEL: Model to use (default: auto)
-        LLM_TIMEOUT: Request timeout in seconds (default: 30)
+        LLM_TIMEOUT: Request timeout in seconds (default: 300)
         LLM_DEBUG: Enable debug logging (default: false)
 
     Returns:
@@ -32,6 +32,6 @@ def get_default_config() -> Dict[str, Any]:
     return {
         "base_url": os.getenv("LLM_BASE_URL", "http://localhost:1234/v1"),
         "model": os.getenv("LLM_MODEL", "auto"),
-        "timeout": int(os.getenv("LLM_TIMEOUT", "30")),
+        "timeout": int(os.getenv("LLM_TIMEOUT", "300")),
         "debug": os.getenv("LLM_DEBUG", "false").lower() in ("true", "1", "yes"),
     }
