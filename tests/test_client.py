@@ -373,3 +373,67 @@ class TestLocalLLMClientErrorHandling:
 
         with pytest.raises(Exception, match="Timeout"):
             mock_client.chat("Hello")
+
+
+class TestLocalLLMClientNewFeatures:
+    """Test new SDK features (timeout, conversation additions, react)."""
+
+    def test_timeout_configuration(self):
+        """Test timeout configuration."""
+        # Test default timeout
+        client_default = LocalLLMClient("http://localhost:1234/v1", "test-model")
+        assert client_default.timeout == 300
+
+        # Test custom timeout
+        client_custom = LocalLLMClient("http://localhost:1234/v1", "test-model", timeout=600)
+        assert client_custom.timeout == 600
+
+    def test_last_conversation_additions_attribute(self, mock_client):
+        """Test last_conversation_additions attribute exists and initializes empty."""
+        assert hasattr(mock_client, 'last_conversation_additions')
+        assert mock_client.last_conversation_additions == []
+
+    @patch('local_llm_sdk.client.requests.post')
+    def test_conversation_additions_cleared_on_chat(self, mock_post, mock_client, mock_response_with_content):
+        """Test last_conversation_additions is cleared on new chat call."""
+        mock_post.return_value = mock_response_with_content
+
+        # Manually set some additions
+        mock_client.last_conversation_additions = [Mock(), Mock()]
+
+        # Call chat - should clear
+        mock_client.chat("test")
+
+        assert mock_client.last_conversation_additions == []
+
+    def test_handle_tool_calls_return_type(self, mock_client):
+        """Test _handle_tool_calls returns tuple of (response, messages)."""
+        from local_llm_sdk.models import ChatCompletion, ChatCompletionChoice
+        from local_llm_sdk import create_chat_message
+
+        # Create mock response with no tool calls (simplest case)
+        mock_message = create_chat_message("assistant", "Response without tools")
+        mock_message.tool_calls = []  # Empty list, not None
+        mock_choice = ChatCompletionChoice(
+            index=0,
+            message=mock_message,
+            finish_reason="stop"
+        )
+        mock_response = Mock(spec=ChatCompletion)
+        mock_response.choices = [mock_choice]
+
+        # Create proper ChatMessage list
+        messages = [create_chat_message("user", "Test message")]
+
+        # Mock _send_request to avoid actual API calls
+        with patch.object(mock_client, '_send_request', return_value=mock_response):
+            result = mock_client._handle_tool_calls(mock_response, messages)
+
+        # Should return tuple
+        assert isinstance(result, tuple)
+        assert len(result) == 2
+
+    def test_react_convenience_method(self, mock_client):
+        """Test client has react() convenience method for agents."""
+        assert hasattr(mock_client, 'react')
+        assert callable(mock_client.react)

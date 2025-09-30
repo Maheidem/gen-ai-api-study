@@ -34,7 +34,7 @@ class ModelList(BaseModel):
 
 class FunctionCall(BaseModel):
     """Function call details within a tool call."""
-    name: str
+    name: str = Field(min_length=1)
     arguments: str
 
 
@@ -60,7 +60,7 @@ class ToolCall(BaseModel):
 
 class ChatMessage(BaseModel):
     """Message in a chat conversation."""
-    role: Union[Literal["system", "user", "assistant", "tool", "function"], str]
+    role: Literal["system", "user", "assistant", "tool", "function"]
     content: Optional[Union[str, List[Dict[str, Any]]]] = None  # Can be string or multi-modal content
     name: Optional[str] = None  # For function/tool messages
     tool_calls: Optional[List[ToolCall]] = Field(default=None)
@@ -88,9 +88,9 @@ class ChatCompletionChoice(BaseModel):
 
 class CompletionUsage(BaseModel):
     """Token usage information for the completion."""
-    prompt_tokens: int
-    completion_tokens: int
-    total_tokens: int
+    prompt_tokens: int = Field(ge=0)
+    completion_tokens: Optional[int] = Field(default=None, ge=0)
+    total_tokens: int = Field(ge=0)
 
 
 class ChatCompletion(BaseModel):
@@ -100,13 +100,14 @@ class ChatCompletion(BaseModel):
     created: int
     model: str
     choices: List[ChatCompletionChoice]
-    usage: CompletionUsage
+    usage: Optional[CompletionUsage] = None
     stats: Optional[Dict[str, Any]] = Field(default=None)  # LM Studio specific
     system_fingerprint: Optional[str] = None
 
     def __repr__(self) -> str:
         """String representation for debugging."""
-        return f"ChatCompletion(model={self.model}, tokens={self.usage.total_tokens}, choices={len(self.choices)})"
+        tokens_info = f", tokens={self.usage.total_tokens}" if self.usage else ""
+        return f"ChatCompletion(model={self.model}{tokens_info}, choices={len(self.choices)})"
 
 
 # ============================================================================
@@ -119,19 +120,19 @@ class ChatCompletionRequest(BaseModel):
     messages: List[ChatMessage]
 
     # Optional parameters
-    frequency_penalty: Optional[float] = Field(default=0, ge=-2.0, le=2.0)
+    frequency_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
     logit_bias: Optional[Dict[str, float]] = None
     logprobs: Optional[bool] = None
     top_logprobs: Optional[int] = Field(default=None, ge=0, le=20)
     max_tokens: Optional[int] = None
-    n: Optional[int] = Field(default=1, ge=1, le=128)
-    presence_penalty: Optional[float] = Field(default=0, ge=-2.0, le=2.0)
+    n: Optional[int] = Field(default=None, ge=1, le=128)
+    presence_penalty: Optional[float] = Field(default=None, ge=-2.0, le=2.0)
     response_format: Optional[Dict[str, str]] = None  # {"type": "json_object"}
     seed: Optional[int] = None
     stop: Optional[Union[str, List[str]]] = None
-    stream: Optional[bool] = False
-    temperature: Optional[float] = Field(default=1.0, ge=0, le=2)
-    top_p: Optional[float] = Field(default=1.0, ge=0, le=1)
+    stream: Optional[bool] = None
+    temperature: Optional[float] = Field(default=None, ge=0, le=2)
+    top_p: Optional[float] = Field(default=None, ge=0, le=1)
     tools: Optional[List[Tool]] = None
     tool_choice: Optional[Union[str, Dict[str, Any]]] = None  # "none", "auto", or specific tool
     user: Optional[str] = None

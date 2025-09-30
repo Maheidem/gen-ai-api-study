@@ -183,8 +183,8 @@ class LocalLLMClient:
         if not content:
             return content, ""
 
-        # Extract thinking blocks
-        pattern = r'\[THINK\](.*?)\[/THINK\]'
+        # Extract thinking blocks - use negative lookahead to avoid matching across multiple [THINK] tags
+        pattern = r'\[THINK\]((?:(?!\[THINK\]).)*?)\[/THINK\]'
         thinking_matches = re.findall(pattern, content, re.DOTALL)
         thinking = '\n'.join(match.strip() for match in thinking_matches) if thinking_matches else ""
 
@@ -272,7 +272,9 @@ class LocalLLMClient:
             stream: Whether to stream the response
             return_full: Force returning full ChatCompletion object
             include_thinking: Whether to include thinking blocks in response
-            **kwargs: Additional parameters for ChatCompletionRequest
+            **kwargs: Additional parameters for ChatCompletionRequest.
+                     Special kwargs when messages is a string:
+                     - system: Custom system prompt (default: "You are a helpful assistant with access to tools.")
 
         Returns:
             String response (simple mode) or ChatCompletion object (detailed mode)
@@ -284,14 +286,24 @@ class LocalLLMClient:
 
         # Convert string to messages if needed
         if isinstance(messages, str):
+            # Extract system prompt from kwargs if provided, otherwise use default
+            system_prompt = kwargs.pop('system', "You are a helpful assistant with access to tools.")
             messages = [
-                create_chat_message("system", "You are a helpful assistant with access to tools."),
+                create_chat_message("system", system_prompt),
                 create_chat_message("user", messages)
             ]
 
-        # Build request
+        # Build request - require model to be specified
+        selected_model = model or self.default_model
+        if not selected_model:
+            raise ValueError(
+                "No model specified. Please provide a model parameter or set a default model during client initialization.\n"
+                "Example: client.chat('Hello', model='your-model-name')\n"
+                "Or: client = LocalLLMClient(base_url='...', model='your-model-name')"
+            )
+
         request = create_chat_completion_request(
-            model=model or self.default_model,
+            model=selected_model,
             messages=messages,
             temperature=temperature,
             max_tokens=max_tokens,
@@ -469,6 +481,9 @@ class LocalLLMClient:
                 messages.append(tool_message)
 
         # Get final response
+        if not self.default_model:
+            raise ValueError("No model available for tool response. This should not happen.")
+
         final_request = create_chat_completion_request(
             model=self.default_model,
             messages=messages,

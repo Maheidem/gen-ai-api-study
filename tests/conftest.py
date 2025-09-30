@@ -86,7 +86,12 @@ def mock_response_with_content():
                 "content": "Test response"
             },
             "finish_reason": "stop"
-        }]
+        }],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15
+        }
     }
     mock_response.raise_for_status.return_value = None
     return mock_response
@@ -108,7 +113,12 @@ def mock_response_with_thinking():
                 "content": "[THINK]This is my thinking process[/THINK]This is the final answer."
             },
             "finish_reason": "stop"
-        }]
+        }],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15
+        }
     }
     mock_response.raise_for_status.return_value = None
     return mock_response
@@ -138,7 +148,12 @@ def mock_response_with_tool_calls():
                 }]
             },
             "finish_reason": "tool_calls"
-        }]
+        }],
+        "usage": {
+            "prompt_tokens": 10,
+            "completion_tokens": 5,
+            "total_tokens": 15
+        }
     }
     mock_response.raise_for_status.return_value = None
     return mock_response
@@ -259,3 +274,29 @@ def complex_tool_test_function():
         }
 
     return text_processor
+
+
+@pytest.fixture
+def mock_agent_result():
+    """Create a sample AgentResult for testing."""
+    from local_llm_sdk.agents.models import AgentResult, AgentStatus
+    return AgentResult(
+        status=AgentStatus.SUCCESS,
+        iterations=3,
+        final_response="Task completed successfully",
+        conversation=[],
+        metadata={"total_tool_calls": 2}
+    )
+
+
+@pytest.fixture
+def mock_react_agent(mock_client):
+    """Create a ReACT agent with mocked client for testing."""
+    from local_llm_sdk.agents import ReACT
+    return ReACT(mock_client, name="TestAgent")
+
+
+@pytest.fixture
+def sample_agent_task():
+    """Create a sample task string for agent testing."""
+    return "Calculate 5 + 3 and tell me the result"
