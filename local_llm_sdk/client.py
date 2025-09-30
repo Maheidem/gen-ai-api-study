@@ -6,6 +6,28 @@ Combines api_models, tools, and provides a clean interface.
 import requests
 import json
 from typing import List, Optional, Dict, Any, Union
+
+# MLflow tracing support (optional, graceful degradation)
+try:
+    import mlflow
+    MLFLOW_AVAILABLE = True
+except ImportError:
+    MLFLOW_AVAILABLE = False
+    # Create no-op decorator if MLflow not available
+    class mlflow:
+        @staticmethod
+        def trace(name=None, span_type=None, attributes=None):
+            def decorator(func):
+                return func
+            return decorator
+
+        @staticmethod
+        def start_span(name, span_type=None, attributes=None):
+            from contextlib import contextmanager
+            @contextmanager
+            def _span():
+                yield
+            return _span()
 from .models import (
     ChatCompletion,
     ChatCompletionRequest,
@@ -194,6 +216,7 @@ class LocalLLMClient:
         response.raise_for_status()
         return ModelList.model_validate(response.json())
 
+    @mlflow.trace(name="chat", span_type="CHAT_MODEL")
     def chat(
         self,
         messages: Union[str, List[ChatMessage]],
@@ -307,6 +330,7 @@ class LocalLLMClient:
             # Advanced mode: return full ChatCompletion
             return response
 
+    @mlflow.trace(name="send_request", span_type="LLM")
     def _send_request(self, request: ChatCompletionRequest, retry_count: int = 3) -> ChatCompletion:
         """
         Send request to local LLM API with automatic retry on connection errors.
@@ -350,6 +374,7 @@ class LocalLLMClient:
         if last_error:
             raise last_error
 
+    @mlflow.trace(name="handle_tool_calls", span_type="AGENT")
     def _handle_tool_calls(
         self,
         response: ChatCompletion,
@@ -365,16 +390,21 @@ class LocalLLMClient:
 
         # Execute each tool call
         for tool_call in response.choices[0].message.tool_calls:
-            # Execute tool
-            result = self.tools.execute(
-                tool_call.function.name,
-                json.loads(tool_call.function.arguments)
-            )
+            # Create a span for each tool execution
+            with mlflow.start_span(
+                name=f"tool_{tool_call.function.name}",
+                span_type="TOOL"
+            ) as span:
+                # Execute tool
+                result = self.tools.execute(
+                    tool_call.function.name,
+                    json.loads(tool_call.function.arguments)
+                )
 
-            # Add tool response to conversation
-            tool_message = create_chat_message("tool", result)
-            tool_message.tool_call_id = tool_call.id
-            messages.append(tool_message)
+                # Add tool response to conversation
+                tool_message = create_chat_message("tool", result)
+                tool_message.tool_call_id = tool_call.id
+                messages.append(tool_message)
 
         # Get final response
         final_request = create_chat_completion_request(
