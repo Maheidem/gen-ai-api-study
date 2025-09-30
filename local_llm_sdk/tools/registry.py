@@ -140,23 +140,51 @@ class ToolRegistry:
             JSON string with the result
         """
         if tool_name not in self._tools:
-            return json.dumps({"error": f"Unknown tool: {tool_name}"})
+            available = ", ".join(self._tools.keys())
+            return json.dumps({
+                "error": f"Unknown tool: {tool_name}",
+                "available_tools": available,
+                "suggestion": f"Did you mean one of: {available}?" if available else "No tools are registered."
+            })
 
         try:
             result = self._tools[tool_name](**arguments)
 
-            # Ensure result is JSON-serializable
-            if isinstance(result, dict):
+            # Better auto-wrapping for different result types
+            if result is None:
+                return json.dumps({"success": True, "result": None})
+            elif isinstance(result, (str, int, float, bool)):
+                return json.dumps({"success": True, "result": result})
+            elif isinstance(result, dict):
+                # Add success field if not present
+                if "error" not in result and "success" not in result:
+                    result["success"] = True
                 return json.dumps(result)
+            elif isinstance(result, (list, tuple)):
+                return json.dumps({"success": True, "result": list(result)})
             else:
-                return json.dumps({"result": result})
+                # Try to convert to string for unknown types
+                return json.dumps({"success": True, "result": str(result)})
 
         except Exception as e:
-            return json.dumps({"error": str(e)})
+            return json.dumps({"success": False, "error": str(e)})
 
     def list_tools(self) -> List[str]:
         """List all registered tool names."""
         return list(self._tools.keys())
+
+    def copy_from(self, other_registry: 'ToolRegistry') -> None:
+        """
+        Copy all tools from another registry to this one.
+
+        Args:
+            other_registry: The registry to copy tools from
+        """
+        # Copy tools and schemas from the other registry
+        self._tools.update(other_registry._tools)
+        for schema in other_registry._schemas:
+            if schema not in self._schemas:
+                self._schemas.append(schema)
 
 
 # Global registry instance

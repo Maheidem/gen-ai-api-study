@@ -45,11 +45,42 @@ from .tools import ToolRegistry, tool
 # Convenience re-export
 Client = LocalLLMClient
 
+
+# Convenience functions for quick setup
+def create_client_with_tools(base_url: str = "http://localhost:1234/v1", model: str = "auto") -> LocalLLMClient:
+    """
+    Create a LocalLLMClient with built-in tools pre-loaded.
+
+    This is a convenience function that creates a client and automatically
+    loads all built-in tools, making it ready to use immediately.
+
+    Args:
+        base_url: Base URL for the local LLM API
+        model: Model to use ("auto" to auto-detect first available)
+
+    Returns:
+        LocalLLMClient instance with tools loaded
+
+    Example:
+        >>> from local_llm_sdk import create_client_with_tools
+        >>> client = create_client_with_tools()
+        >>> response = client.chat("What's 2+2?")
+    """
+    client = LocalLLMClient(base_url, model)
+    client.register_tools_from(None)  # Load built-in tools
+    return client
+
+
+# Pre-configured default client for immediate use
+default_client = create_client_with_tools()
+
 __all__ = [
     # Client
     "LocalLLMClient",
     "Client",
     "create_client",
+    "create_client_with_tools",
+    "default_client",
     "quick_chat",
 
     # Models

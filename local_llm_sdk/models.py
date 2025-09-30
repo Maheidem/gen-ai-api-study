@@ -67,6 +67,16 @@ class ChatMessage(BaseModel):
     tool_call_id: Optional[str] = None  # For tool response messages
     function_call: Optional[FunctionCall] = None  # Deprecated, use tool_calls
 
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        if isinstance(self.content, str):
+            content_preview = self.content[:50] + "..." if len(self.content) > 50 else self.content
+        else:
+            content_preview = str(self.content)[:50] + "..."
+
+        tool_info = f", tools={len(self.tool_calls)}" if self.tool_calls else ""
+        return f"ChatMessage(role={self.role}, content='{content_preview}'{tool_info})"
+
 
 class ChatCompletionChoice(BaseModel):
     """A single completion choice in the response."""
@@ -93,6 +103,10 @@ class ChatCompletion(BaseModel):
     usage: CompletionUsage
     stats: Optional[Dict[str, Any]] = Field(default=None)  # LM Studio specific
     system_fingerprint: Optional[str] = None
+
+    def __repr__(self) -> str:
+        """String representation for debugging."""
+        return f"ChatCompletion(model={self.model}, tokens={self.usage.total_tokens}, choices={len(self.choices)})"
 
 
 # ============================================================================

@@ -31,16 +31,26 @@ class LocalLLMClient:
         response = client.chat("What is 2+2?")
     """
 
-    def __init__(self, base_url: str = "http://localhost:1234/v1", model: str = None):
+    def __init__(self, base_url: str = None, model: str = None, timeout: int = None):
         """
-        Initialize LM Studio client.
+        Initialize Local LLM client.
 
         Args:
-            base_url: Base URL for LM Studio API
-            model: Default model to use (can be overridden per request)
+            base_url: Base URL for local LLM API (e.g., LM Studio, Ollama).
+                     Falls back to LLM_BASE_URL env var or "http://localhost:1234/v1"
+            model: Default model to use. Use "auto" to automatically detect the first available model,
+                   or specify a model name explicitly. Falls back to LLM_MODEL env var or "auto"
+            timeout: Request timeout in seconds. Falls back to LLM_TIMEOUT env var or 30
         """
-        self.base_url = base_url.rstrip('/')
-        self.default_model = model
+        from .config import get_default_config
+
+        # Load config from environment variables
+        config = get_default_config()
+
+        # Use provided values or fall back to config
+        self.base_url = (base_url or config["base_url"]).rstrip('/')
+        self.timeout = timeout if timeout is not None else config["timeout"]
+        model = model or config["model"]
         self.tools = ToolRegistry()
         self.last_tool_calls = []  # Track tool calls from last request
         self.last_thinking = ""  # Track thinking blocks from last request
@@ -52,6 +62,22 @@ class LocalLLMClient:
             "completions": f"{self.base_url}/completions",
             "embeddings": f"{self.base_url}/embeddings"
         }
+
+        # Auto-detect model if requested
+        if model == "auto":
+            try:
+                models = self.list_models()
+                if models.data and len(models.data) > 0:
+                    self.default_model = models.data[0].id
+                    print(f"✓ Auto-detected model: {self.default_model}")
+                else:
+                    self.default_model = None
+                    print("⚠ Warning: No models found. Please specify a model or load one in your LLM server.")
+            except Exception as e:
+                self.default_model = None
+                print(f"⚠ Warning: Could not auto-detect model ({str(e)}). You'll need to specify model per request.")
+        else:
+            self.default_model = model
 
     def register_tool(self, description: str = ""):
         """
@@ -66,21 +92,26 @@ class LocalLLMClient:
 
     def register_tools_from(self, module):
         """
-        Import tools from a module (like registered_tools).
+        Import tools from a module or registry.
 
         Args:
-            module: Module containing tool-decorated functions
+            module: Module containing tool-decorated functions or a ToolRegistry instance
         """
-        # Import the tools from the module's registry
-        from .tools import registry as global_registry
-
-        # The builtin module uses the global registry
-        # Copy all tools from the global registry to our client's registry
-        for tool_name in global_registry.tools._tools:
-            self.tools._tools[tool_name] = global_registry.tools._tools[tool_name]
-        for schema in global_registry.tools._schemas:
-            if schema not in self.tools._schemas:  # Avoid duplicates
-                self.tools._schemas.append(schema)
+        if module is None:
+            # Load built-in tools
+            from .tools import registry as global_registry
+            # Import builtin to trigger decorator registration
+            from .tools import builtin
+            # Copy registered tools to our client's registry using public API
+            self.tools.copy_from(global_registry.tools)
+        elif hasattr(module, 'tools') and hasattr(module.tools, 'copy_from'):
+            # It's a module with a tools registry attribute
+            self.tools.copy_from(module.tools)
+        else:
+            # Assume it's a registry directly
+            from .tools import registry as global_registry
+            from .tools import builtin
+            self.tools.copy_from(global_registry.tools)
 
         return self
 
@@ -108,6 +139,54 @@ class LocalLLMClient:
         clean_content = re.sub(pattern, '', content, flags=re.DOTALL).strip()
 
         return clean_content, thinking
+
+    def _parse_text_tool_calls(self, content: str) -> List[ToolCall]:
+        """
+        Parse text-based tool calls from content when model uses [TOOL_CALLS]format.
+
+        Extracts tool calls in format: [TOOL_CALLS]tool_name[ARGS]{json_args}
+
+        Args:
+            content: Raw content that may contain text-based tool calls
+
+        Returns:
+            List of ToolCall objects parsed from text
+        """
+        import re
+        import uuid
+
+        if not content or '[TOOL_CALLS]' not in content:
+            return []
+
+        tool_calls = []
+
+        # Pattern to match: [TOOL_CALLS]tool_name[ARGS]{...}
+        pattern = r'\[TOOL_CALLS\](\w+)\[ARGS\](\{[^}]+\})'
+        matches = re.findall(pattern, content)
+
+        for tool_name, args_json in matches:
+            try:
+                # Verify this is a registered tool
+                if tool_name not in self.tools.list_tools():
+                    continue
+
+                # Create a ToolCall object
+                from .models import ToolCall, FunctionCall
+                tool_call = ToolCall(
+                    id=str(uuid.uuid4().hex[:9]),  # Generate ID like LM Studio
+                    type="function",
+                    function=FunctionCall(
+                        name=tool_name,
+                        arguments=args_json
+                    )
+                )
+                tool_calls.append(tool_call)
+
+            except Exception:
+                # Skip malformed tool calls
+                continue
+
+        return tool_calls
 
     def list_models(self) -> ModelList:
         """Get list of available models from LM Studio."""
@@ -173,8 +252,20 @@ class LocalLLMClient:
         # Send request
         response = self._send_request(request)
 
+        # Check for tool calls - structured or text-based
+        message = response.choices[0].message
+        has_structured_tools = message.tool_calls and len(message.tool_calls) > 0
+
+        # If no structured tool calls but content has [TOOL_CALLS], parse them
+        if not has_structured_tools and use_tools and message.content:
+            text_tool_calls = self._parse_text_tool_calls(message.content)
+            if text_tool_calls:
+                # Add parsed tool calls to the message
+                message.tool_calls = text_tool_calls
+                has_structured_tools = True
+
         # Handle tool calls if present
-        if response.choices[0].message.tool_calls and use_tools:
+        if has_structured_tools and use_tools:
             # Store tool calls before they're lost in the second request
             self.last_tool_calls = response.choices[0].message.tool_calls
 
@@ -216,15 +307,48 @@ class LocalLLMClient:
             # Advanced mode: return full ChatCompletion
             return response
 
-    def _send_request(self, request: ChatCompletionRequest) -> ChatCompletion:
-        """Send request to LM Studio and return typed response."""
-        response = requests.post(
-            self.endpoints["chat"],
-            json=request.model_dump(exclude_none=True),
-            timeout=30
-        )
-        response.raise_for_status()
-        return ChatCompletion.model_validate(response.json())
+    def _send_request(self, request: ChatCompletionRequest, retry_count: int = 3) -> ChatCompletion:
+        """
+        Send request to local LLM API with automatic retry on connection errors.
+
+        Args:
+            request: The chat completion request to send
+            retry_count: Number of retry attempts on connection failures (default: 3)
+
+        Returns:
+            ChatCompletion response from the API
+
+        Raises:
+            ConnectionError or Timeout after all retries are exhausted
+        """
+        import time
+        from requests.exceptions import ConnectionError, Timeout
+
+        last_error = None
+
+        for attempt in range(retry_count):
+            try:
+                response = requests.post(
+                    self.endpoints["chat"],
+                    json=request.model_dump(exclude_none=True),
+                    timeout=self.timeout
+                )
+                response.raise_for_status()
+                return ChatCompletion.model_validate(response.json())
+
+            except (ConnectionError, Timeout) as e:
+                last_error = e
+                if attempt < retry_count - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4 seconds
+                    print(f"⚠ Connection failed, retrying in {wait_time}s... (attempt {attempt + 1}/{retry_count})")
+                    time.sleep(wait_time)
+                else:
+                    print(f"✗ Connection failed after {retry_count} attempts")
+                    raise
+
+        # Should never reach here, but for type safety
+        if last_error:
+            raise last_error
 
     def _handle_tool_calls(
         self,
@@ -232,6 +356,9 @@ class LocalLLMClient:
         original_messages: List[ChatMessage]
     ) -> ChatCompletion:
         """Handle tool calls and get final response."""
+        # Store original tool calls to preserve them
+        original_tool_calls = response.choices[0].message.tool_calls
+
         # Build conversation with tool calls
         messages = original_messages.copy()
         messages.append(response.choices[0].message)
@@ -256,7 +383,13 @@ class LocalLLMClient:
             temperature=0.7
         )
 
-        return self._send_request(final_request)
+        final_response = self._send_request(final_request)
+
+        # Preserve the tool calls from the first response on the final response
+        # This allows tracking and observability even after automatic tool execution
+        final_response.choices[0].message.tool_calls = original_tool_calls
+
+        return final_response
 
     def embeddings(
         self,
@@ -342,7 +475,26 @@ def create_client(base_url: str = "http://localhost:1234/v1", model: str = None)
     return LocalLLMClient(base_url, model)
 
 
-def quick_chat(query: str, base_url: str = "http://localhost:1234/v1", model: str = "default") -> str:
-    """Quick one-off chat without creating a client."""
+def quick_chat(query: str, base_url: str = "http://localhost:1234/v1", model: str = "auto") -> str:
+    """
+    Quick one-off chat with auto-configuration and built-in tools.
+
+    This convenience function creates a client, auto-detects the model if needed,
+    loads built-in tools, and returns a simple string response.
+
+    Args:
+        query: The message to send
+        base_url: Base URL for the local LLM API
+        model: Model to use ("auto" to auto-detect)
+
+    Returns:
+        String response from the model
+
+    Example:
+        >>> from local_llm_sdk import quick_chat
+        >>> response = quick_chat("What's 2+2?")
+    """
     client = LocalLLMClient(base_url, model)
-    return client.chat_simple(query)
+    # Auto-load built-in tools for better responses
+    client.register_tools_from(None)
+    return client.chat(query, use_tools=True)
