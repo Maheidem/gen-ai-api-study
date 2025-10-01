@@ -9,5 +9,21 @@ __pycache__/
 build/
 dist/
 .venv/
-venv/mlruns/
+venv/
+mlruns/
 notebooks/mlruns/
+
+# Environment variables (contains secrets)
+.env
+.env.local
+.env.production
+.env.development
+
+# Coverage reports
+htmlcov/
+.coverage
+coverage.xml
+
+# IDE
+.vscode/
+.idea/

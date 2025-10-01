@@ -6,6 +6,10 @@ typing-extensions>=4.0.0;python_version<'3.10'
 # Optional: For notebooks
 jupyter>=1.0.0
 ipykernel>=6.0.0
+python-dotenv>=1.0.0
 
 # Optional: For MLflow tracking and observability
 mlflow>=3.0.0
+
+# Optional: For notebook testing
+testbook>=0.4.2

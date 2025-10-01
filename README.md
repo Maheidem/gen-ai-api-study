@@ -26,18 +26,43 @@ pip install -r requirements.txt
 
 ## Quick Start
 
+### 1. Configure Your LLM Server
+
+Create a `.env` file in the project root:
+
+```bash
+LLM_BASE_URL=http://localhost:1234/v1
+LLM_MODEL=your-model-name
+```
+
+### 2. Use the SDK
+
 ```python
 from local_llm_sdk import LocalLLMClient
+from dotenv import load_dotenv
+import os
+
+# Load configuration
+load_dotenv()
 
 # Create client
 client = LocalLLMClient(
-    base_url="http://localhost:1234/v1",
-    model="your-model-name"
+    base_url=os.getenv("LLM_BASE_URL"),
+    model=os.getenv("LLM_MODEL")
 )
 
 # Simple chat
 response = client.chat("What is the capital of France?")
 print(response)
+```
+
+**Or use hardcoded values** (not recommended for production):
+
+```python
+client = LocalLLMClient(
+    base_url="http://localhost:1234/v1",
+    model="your-model-name"
+)
 ```
 
 ## Tool Usage
@@ -141,6 +166,66 @@ response = client.chat("Explain how to multiply", tool_choice="none")
 
 **Note:** Reasoning models (Magistral, etc.) may skip tools for simple calculations when using `tool_choice="auto"`. Use `tool_choice="required"` to guarantee tool execution.
 
+## Configuration
+
+### Environment Variables
+
+The recommended way to configure the SDK is using a `.env` file:
+
+```bash
+# .env file
+LLM_BASE_URL=http://localhost:1234/v1
+LLM_MODEL=your-model-name
+LLM_TIMEOUT=300
+LLM_DEBUG=false
+```
+
+**Available Variables:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `LLM_BASE_URL` | `http://localhost:1234/v1` | Base URL for your LLM server |
+| `LLM_MODEL` | `auto` | Model to use (or "auto" for auto-detection) |
+| `LLM_TIMEOUT` | `300` | Request timeout in seconds |
+| `LLM_DEBUG` | `false` | Enable debug logging |
+
+**Using Environment Variables:**
+
+```python
+from local_llm_sdk import LocalLLMClient
+from dotenv import load_dotenv
+import os
+
+load_dotenv()
+
+client = LocalLLMClient(
+    base_url=os.getenv("LLM_BASE_URL"),
+    model=os.getenv("LLM_MODEL"),
+    timeout=int(os.getenv("LLM_TIMEOUT", "300"))
+)
+```
+
+### Multi-Environment Setup
+
+Create different `.env` files for different environments:
+
+```bash
+.env.local       # Your local machine
+.env.production  # Production settings
+.env.development # Development settings
+```
+
+Load specific environment:
+
+```python
+from dotenv import load_dotenv
+
+# Load specific env file
+load_dotenv(".env.production")
+```
+
+**Important:** Add `.env` to `.gitignore` to avoid committing secrets. Provide a `.env.example` for documentation.
+
 ## Project Structure
 
 ```
@@ -158,8 +243,23 @@ local_llm_sdk/
 
 The `notebooks/` directory contains a **progressive learning path** from beginner to advanced (total: ~3 hours):
 
+### Prerequisites
+
+All notebooks now use `.env` configuration for portability:
+
+1. **Create `.env` file** in project root:
+   ```bash
+   LLM_BASE_URL=http://localhost:1234/v1
+   LLM_MODEL=your-model-name
+   ```
+
+2. **Install dependencies**:
+   ```bash
+   pip install -r requirements.txt  # Includes python-dotenv
+   ```
+
 ### Level 1: Foundations (30 min)
-- `01-installation-setup.ipynb` - Install SDK, connect to LM Studio, verify setup
+- `01-installation-setup.ipynb` - Install SDK, configure .env, connect to LM Studio
 - `02-basic-chat.ipynb` - Simple chat, system prompts, temperature control
 - `03-conversation-history.ipynb` - Multi-turn conversations with context
 
@@ -171,13 +271,15 @@ The `notebooks/` directory contains a **progressive learning path** from beginne
 ### Level 3: Advanced (60 min)
 - `07-react-agents.ipynb` - ReACT pattern for multi-step tasks
 - `08-mlflow-observability.ipynb` - Tracing and debugging with MLflow
-- `09-production-patterns.ipynb` - Error handling, retries, configuration
+- `09-production-patterns.ipynb` - Error handling, retries, .env configuration patterns
 
 ### Level 4: Projects (60 min)
 - `10-mini-project-code-helper.ipynb` - Code review assistant agent
 - `11-mini-project-data-analyzer.ipynb` - Data analysis pipeline
 
 **Start with `01-installation-setup.ipynb` if you're new to the SDK!**
+
+**Note:** All notebooks load configuration from `.env` - update once, works everywhere!
 
 ## ReACT Agents
 
@@ -207,16 +309,56 @@ See `notebooks/07-react-agents.ipynb` for complete tutorials and examples.
 
 ## Development
 
-### Run Tests
+### Setup Development Environment
+
 ```bash
-pytest tests/
+# Clone the repository
+git clone https://github.com/Maheidem/gen-ai-api-study.git
+cd gen-ai-api-study
+
+# Install in development mode
+pip install -e .
+pip install -r requirements.txt
+
+# Create .env file for testing
+cp .env.example .env
+# Edit .env with your LM Studio settings
 ```
 
+### Run Tests
+
+**All tests must be run locally** as they require LM Studio:
+
+```bash
+# Run unit tests (fast, ~2 min)
+pytest tests/ -v
+
+# Run with coverage
+pytest tests/ --cov=local_llm_sdk --cov-report=html
+
+# Run behavioral tests (requires LM Studio running)
+pytest tests/ -m "live_llm and behavioral" -v
+
+# Run golden dataset tests
+pytest tests/ -m "live_llm and golden" -v
+```
+
+**Note:** Tests require LM Studio running on configured URL. See `docs/contributing/testing.md` for details.
+
 ### Code Formatting
+
 ```bash
 black local_llm_sdk/
 isort local_llm_sdk/
 ```
+
+### Testing Philosophy
+
+- **Unit tests** (213+ tests): Fast, mocked tests for code correctness
+- **Behavioral tests** (~20 tests): Real LLM validation with property-based assertions
+- **Golden dataset** (16 tasks): Regression tests with success rate tracking
+
+All tests run locally - no CI/CD due to LM Studio dependency.
 
 ## Contributing
 

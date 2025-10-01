@@ -2,9 +2,52 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Quick Reference
+
+**Setup:**
+```bash
+pip install -e .                    # Install in development mode
+pip install -r requirements.txt     # Install dependencies
+```
+
+**Testing:**
+```bash
+pytest tests/ -v                    # Run all tests (fast, mocked)
+pytest tests/test_client.py -v      # Run specific test file
+pytest tests/test_agents.py::TestReACTAgent::test_react_agent_simple_task -v  # Run single test
+pytest tests/ --cov=local_llm_sdk --cov-report=html  # With coverage
+```
+
+**Behavioral Tests (requires LM Studio running):**
+```bash
+pytest tests/ -m "live_llm and behavioral" -v  # Real LLM behavior tests
+pytest tests/ -m "live_llm and golden" -v      # Golden dataset regression
+```
+
+**Code Quality:**
+```bash
+black local_llm_sdk/          # Format code
+isort local_llm_sdk/          # Sort imports
+pytest tests/ -v              # Verify tests pass
+```
+
+**Environment Variables:**
+```bash
+export LLM_BASE_URL="http://169.254.83.107:1234/v1"  # LM Studio URL
+export LLM_MODEL="your-model"                         # Model name
+export LLM_TIMEOUT="300"                              # Request timeout (seconds)
+export LLM_DEBUG="true"                               # Enable debug logging
+```
+
 ## Project Overview
 
 This is a Generative AI API study repository that has evolved into **Local LLM SDK** - a type-safe Python SDK for interacting with local LLM APIs that implement the OpenAI specification. The project provides a clean, extensible interface for working with LM Studio, Ollama, and other OpenAI-compatible servers.
+
+**Key Technologies:**
+- **Python 3.12.11** with Pydantic v2 for type safety
+- **OpenAI API compatibility** (works with LM Studio, Ollama, LocalAI)
+- **MLflow integration** (optional) for tracing and observability
+- **Pytest** with ~213 unit tests + behavioral test suite
 
 ## Study Approach
 
@@ -47,56 +90,85 @@ tail -f /mnt/c/Users/mahei/.cache/lm-studio/server-logs/$(date +%Y-%m)/*.log
 ```
 gen-ai-api-study/
 ├── local_llm_sdk/              # Main Python package
-│   ├── __init__.py            # Package exports
+│   ├── __init__.py            # Package exports and convenience functions
 │   ├── client.py              # LocalLLMClient implementation
+│   ├── config.py              # Configuration management (env vars)
 │   ├── models.py              # Pydantic models (OpenAI spec)
+│   ├── agents/                # Agent framework (ReACT, BaseAgent)
+│   │   ├── base.py           # BaseAgent with MLflow tracing
+│   │   ├── react.py          # ReACT agent implementation
+│   │   └── models.py         # AgentResult, AgentStatus
 │   ├── tools/                 # Tool system
-│   │   ├── __init__.py
-│   │   ├── registry.py        # Tool registry and decorator
-│   │   └── builtin.py         # Built-in tools
+│   │   ├── registry.py       # Tool registry and decorator
+│   │   └── builtin.py        # Built-in tools (Python exec, file ops, etc.)
 │   └── utils/                 # Utility functions
-├── notebooks/                  # Jupyter notebooks
-│   ├── api-hello-world-local.ipynb
-│   ├── tool-use-math-calculator.ipynb
-│   └── tool-use-simplified.ipynb
+├── tests/                      # Comprehensive test suite (~213 tests)
+│   ├── test_client.py         # Client functionality
+│   ├── test_agents.py         # Agent framework tests
+│   ├── test_agents_behavioral.py  # Behavioral tests (live LLM)
+│   ├── test_golden_dataset.py     # Regression tests with success rates
+│   └── golden_dataset.json        # 16 known-good task examples
+├── notebooks/                  # Educational Jupyter notebooks (11 total)
+│   ├── 01-installation-setup.ipynb
+│   ├── 02-basic-chat.ipynb
+│   └── 07-react-agents.ipynb  # ReACT agent tutorial
 ├── .documentation/            # Research documentation
 ├── setup.py                   # Package configuration
-├── requirements.txt           # Dependencies
-└── README.md                  # Project documentation
+└── requirements.txt           # Dependencies (pydantic, requests, mlflow)
 ```
 
 ## Common Development Tasks
 
-### Installing the Package
-```bash
-# Install in development mode
-pip install -e .
+### Configuration via Environment Variables
 
-# Install dependencies
-pip install -r requirements.txt
+The SDK uses `local_llm_sdk/config.py` for configuration management:
+
+```bash
+# Set environment variables (optional - defaults provided)
+export LLM_BASE_URL="http://169.254.83.107:1234/v1"  # Default: http://localhost:1234/v1
+export LLM_MODEL="mistralai/magistral-small-2509"    # Default: auto
+export LLM_TIMEOUT="300"                              # Default: 300 seconds
+export LLM_DEBUG="true"                               # Default: false
+```
+
+Or use defaults in code:
+```python
+from local_llm_sdk import create_client_with_tools
+
+# Uses environment variables or defaults
+client = create_client_with_tools()
 ```
 
 ### Using the SDK
-```python
-from local_llm_sdk import LocalLLMClient, create_client
 
-# Create client
+**Basic Chat:**
+```python
+from local_llm_sdk import LocalLLMClient
+
 client = LocalLLMClient(
     base_url="http://169.254.83.107:1234/v1",
     model="your-model"
 )
-
-# Simple chat
 response = client.chat("Hello!")
 ```
 
-### Running Notebooks
-```bash
-# Navigate to notebooks directory
-cd notebooks/
+**With Tools:**
+```python
+from local_llm_sdk import create_client_with_tools
 
-# Start Jupyter
-jupyter notebook
+client = create_client_with_tools()
+response = client.chat("Calculate 42 * 17", use_tools=True)
+client.print_tool_calls()  # See which tools were used
+```
+
+**ReACT Agent (Multi-Step Tasks):**
+```python
+from local_llm_sdk.agents import ReACT
+
+agent = ReACT(client)
+result = agent.run("Calculate 5 factorial, convert to uppercase, count chars", max_iterations=15)
+print(result.final_response)
+print(f"Iterations: {result.iterations}, Tools: {result.metadata['total_tool_calls']}")
 ```
 
 ### Adding New Tools
@@ -105,23 +177,109 @@ from local_llm_sdk import tool
 
 @tool("Description of your tool")
 def your_tool(param: str) -> dict:
+    """
+    Detailed description for LLM.
+
+    Args:
+        param: Description of parameter
+    """
     return {"result": param.upper()}
+
+# Register with client
+client.register_tool("Your tool")(your_tool)
+```
+
+### Running Notebooks
+```bash
+cd notebooks/
+jupyter notebook  # Start with 01-installation-setup.ipynb
 ```
 
 ## Code Architecture
 
 ### Package Architecture
-- **`local_llm_sdk/`**: Main package with clean separation of concerns
-  - `client.py`: Main LocalLLMClient class
-  - `models.py`: Pydantic models following OpenAI spec
-  - `tools/`: Tool registration and execution system
-- **`notebooks/`**: Interactive examples and tutorials
-- **`.documentation/`**: Research documents with citations
 
-### Key Components
-1. **LocalLLMClient**: Type-safe client with automatic tool handling
-2. **Tool System**: Decorator-based tool registration
-3. **Pydantic Models**: Full OpenAI API specification coverage
+The SDK follows a **layered architecture** with clear separation of concerns:
+
+**Layer 1: Core Client (`client.py`)**
+- `LocalLLMClient` - Main entry point with chat methods
+- Automatic tool handling and conversation state management
+- MLflow tracing integration (optional)
+- 300s default timeout for local models
+
+**Layer 2: Type System (`models.py`)**
+- Pydantic v2 models following OpenAI API specification
+- Strict validation for all request/response types
+- `ChatMessage`, `ChatCompletion`, `Tool`, `ToolCall`, etc.
+
+**Layer 3: Tool System (`tools/`)**
+- `ToolRegistry` - Schema generation and tool execution
+- `@tool` decorator for simple registration
+- Built-in tools: Python execution, file ops, math, text processing
+
+**Layer 4: Agent Framework (`agents/`)**
+- `BaseAgent` - Abstract base with automatic tracing
+- `ReACT` - Reasoning + Acting pattern for multi-step tasks
+- `AgentResult`, `AgentStatus` - Result types
+
+**Layer 5: Configuration (`config.py`)**
+- Environment variable support
+- Default configuration values
+- Type-safe config loading
+
+### Key Architectural Patterns
+
+**1. Conversation State Management**
+- All messages preserved in conversation history
+- Tool results automatically added as `tool` role messages
+- `client.last_conversation_additions` tracks new messages since last call
+- Enables debugging and MLflow tracing
+
+**2. Tool Execution Flow**
+```
+Client.chat(use_tools=True)
+  → Add tool schemas to request
+  → LLM returns tool_calls
+  → Execute via ToolRegistry
+  → Add results as messages
+  → Send back to LLM
+  → Repeat until no tool_calls
+```
+
+**3. Agent Pattern**
+```
+Agent.run(task)
+  → BaseAgent wraps with tracing
+  → Subclass implements _execute()
+  → Conversation context preserved
+  → Returns AgentResult with metadata
+```
+
+**4. MLflow Integration (Optional)**
+- Graceful degradation if not installed
+- Hierarchical traces: agent → iterations → tool calls
+- Automatic span creation with proper parent-child relationships
+- See `agents/base.py:14-19` for fallback handling
+
+### Critical Implementation Details
+
+**Conversation State Tracking (local_llm_sdk/client.py:458-510)**
+- `_handle_tool_calls()` returns tuple: `(content, new_messages)`
+- New messages include: assistant message + tool result messages
+- This fixes the "empty response bug" where tool results disappeared
+- `last_conversation_additions` populated for tracing
+
+**Tool Schema Generation (local_llm_sdk/tools/registry.py:40-95)**
+- Automatic schema generation from Python type hints
+- Converts Python types → JSON Schema types
+- Handles required vs optional parameters
+- Returns OpenAI-compatible `Tool` objects
+
+**ReACT Agent Loop (local_llm_sdk/agents/react.py:99-148)**
+- Optimized system prompt for clear instructions
+- Iteration loop with stop condition checking
+- Tool call counting and metadata tracking
+- Final response extraction (strips "TASK_COMPLETE")
 
 ### Documentation Standards
 - All research includes source citations with timestamps
@@ -468,18 +626,21 @@ When you discover a bug that unit tests missed:
    pytest tests/test_agents_behavioral.py::test_new_behavior -v
    ```
 
-### CI/CD Integration
+### Running Tests Locally
 
-**Unit Tests** (GitHub Actions: `test-unit.yml`):
-- Trigger: Every push/PR
-- Duration: ~2 minutes
-- Tests: All except `live_llm` (default)
+**All tests must be run locally** as they require or benefit from LM Studio:
 
-**Behavioral Tests** (GitHub Actions: `test-behavioral.yml`):
-- Trigger: Nightly at 2:00 AM UTC + manual
-- Duration: ~15-30 minutes
-- Tests: Behavioral + golden dataset
-- **Status**: 🚧 Requires LLM server setup (see `.github/workflows/README.md`)
+**Unit Tests** (Fast, ~2 minutes):
+```bash
+pytest tests/ -v  # Skips live_llm by default
+```
+
+**Behavioral Tests** (Requires LM Studio, ~15-30 minutes):
+```bash
+# Start LM Studio on http://169.254.83.107:1234 first
+pytest tests/ -m "live_llm and behavioral" -v
+pytest tests/ -m "live_llm and golden" -v
+```
 
 ### Troubleshooting
 
@@ -542,11 +703,6 @@ tests/
 ├── test_golden_dataset.py        # Golden dataset runner + success rate tests
 ├── golden_dataset.json           # 16 known-good tasks with properties
 └── conftest.py                   # Shared fixtures
-
-.github/workflows/
-├── test-unit.yml                 # Fast unit tests on every commit
-├── test-behavioral.yml           # Nightly behavioral tests (needs LLM setup)
-└── README.md                     # Workflow documentation
 ```
 
 ## API Compatibility Notes
@@ -578,22 +734,124 @@ When adding new API comparisons:
 5. Update compatibility matrix
 6. Include migration code examples
 
-## Tips for Future Development
+## Development Best Practices
 
-### When Testing New Endpoints
-- Always use Pydantic models for response validation
-- Test with multiple models when available
-- Document timeout requirements (LM Studio can be slower)
-- Include error handling examples
+### Before Making Changes
 
-### When Writing Documentation
-- Follow the existing citation format in `.documentation/`
-- Include practical use cases
-- Provide cost-benefit analysis
-- Note hardware requirements for local deployment
+1. **Read existing tests first** - Understand expected behavior
+2. **Check CLAUDE.md files** - Each directory has context (local_llm_sdk/, tests/, agents/, tools/)
+3. **Run tests locally** - Ensure clean baseline (`pytest tests/ -v`)
+4. **Check conversation state** - Many bugs relate to message handling
+
+### When Adding Features
+
+1. **Write tests first** (TDD) - Define expected behavior
+2. **Update tests for existing functionality** - Ensure no regressions
+3. **Add behavioral tests if LLM behavior matters** - Use property-based assertions
+4. **Update golden dataset** - If pattern is common
+5. **Verify test count increases** - New features need new tests
 
 ### Common Pitfalls to Avoid
-- LM Studio models may have different context windows than OpenAI
-- Streaming implementation varies by model
-- Function calling syntax differs between models
-- Local models require significant RAM (8-64GB depending on model size)
+
+**❌ Don't:**
+- Skip running full test suite before committing
+- Mock away the thing you're trying to test
+- Test exact LLM outputs (use properties instead)
+- Forget to update `last_conversation_additions` when adding messages
+- Assume tool results are automatically preserved (must add as messages)
+- Use mocked tests to validate LLM behavior (use behavioral tests)
+
+**✅ Do:**
+- Run `pytest tests/ -v` before every commit
+- Test invariants and properties, not exact strings
+- Preserve full conversation context (including tool results)
+- Return tuples from `_handle_tool_calls()`: `(content, new_messages)`
+- Use behavioral tests (`@pytest.mark.live_llm`) for LLM behavior
+- Check LM Studio logs when live tests fail: `/mnt/c/Users/mahei/.cache/lm-studio/server-logs/`
+
+### Architecture Guidelines
+
+**When extending the client:**
+- Preserve conversation state (all messages)
+- Track new messages in `last_conversation_additions`
+- Use MLflow tracing for observability
+- Default timeout: 300s (local models are slower)
+
+**When adding tools:**
+- Use `@tool` decorator with clear description
+- Return dict (JSON-serializable)
+- Use type hints for automatic schema generation
+- Handle errors gracefully (return error dict, don't raise)
+
+**When creating agents:**
+- Inherit from `BaseAgent`
+- Implement `_execute()` with task logic
+- Use `@mlflow.trace` for spans
+- Return `AgentResult` with status and metadata
+
+### Model Compatibility Notes
+
+**LM Studio:**
+- Fully supports chat completions, streaming, embeddings
+- Function calling: ~60% compatibility (model-dependent)
+- JSON mode: ~50% compatibility
+- Context windows vary by model (check `/v1/models`)
+- Requires significant RAM (8-64GB depending on model)
+
+**Known Issues:**
+- **qwen3 model**: Has LM Studio bug - use `mistralai/magistral-small-2509` instead
+- **Reasoning models**: May skip tools with `tool_choice="auto"` - use `tool_choice="required"`
+- **Streaming**: Implementation varies by model
+- **Timeout**: Local models slower than cloud APIs (use 300s timeout)
+
+### Debugging Techniques
+
+**Client Issues:**
+```python
+# Enable debug logging
+import os
+os.environ['LLM_DEBUG'] = 'true'
+
+# Check tool calls
+client.chat("Calculate 5!", use_tools=True)
+client.print_tool_calls(detailed=True)
+
+# Inspect conversation
+for msg in client.conversation:
+    print(f"{msg.role}: {msg.content}")
+```
+
+**Agent Issues:**
+```python
+# Run with verbose output
+result = agent.run("task", max_iterations=15, verbose=True)
+
+# Check metadata
+print(f"Iterations: {result.iterations}")
+print(f"Tool calls: {result.metadata['total_tool_calls']}")
+print(f"Status: {result.status}")
+```
+
+**Test Issues:**
+```bash
+# Run with verbose output and stop on first failure
+pytest tests/test_agents.py -v -x
+
+# Run specific test with full traceback
+pytest tests/test_client.py::test_client_chat_with_tools -v --tb=long
+
+# Run behavioral test with LM Studio
+pytest tests/test_agents_behavioral.py::TestReACTBehavior::test_multi_step_iteration_pattern -v -s
+```
+
+**LM Studio Issues:**
+```bash
+# Check server logs
+ls -lt /mnt/c/Users/mahei/.cache/lm-studio/server-logs/$(date +%Y-%m)/ | head
+
+# Search for errors
+grep -r "error" /mnt/c/Users/mahei/.cache/lm-studio/server-logs/$(date +%Y-%m)/
+
+# Test connection
+curl http://169.254.83.107:1234/v1/models
+```
