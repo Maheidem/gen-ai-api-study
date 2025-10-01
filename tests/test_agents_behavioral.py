@@ -39,21 +39,14 @@ class TestReACTBehavior:
     """
 
     @pytest.fixture
-    def client(self):
-        """Create a LocalLLMClient with tools for testing."""
-        from local_llm_sdk import LocalLLMClient
-        client = LocalLLMClient(
-            base_url="http://169.254.83.107:1234/v1",
-            timeout=300
-        )
-        # Register built-in tools
-        client.register_tools_from(None)
-        return client
+    def client(self, live_llm_client):
+        """Use centralized live LLM client from conftest (configured via .env)."""
+        return live_llm_client
 
     @pytest.fixture
-    def agent(self, client):
-        """Create a ReACT agent for testing."""
-        return ReACT(client)
+    def agent(self, live_react_agent):
+        """Use centralized live ReACT agent from conftest (configured via .env)."""
+        return live_react_agent
 
     @pytest.mark.xfail(
         reason="Non-deterministic LLM behavior - use test_multi_step_statistical instead",
@@ -308,21 +301,14 @@ class TestReACTEdgeCases:
     """
 
     @pytest.fixture
-    def client(self):
-        """Create a LocalLLMClient with tools for testing."""
-        from local_llm_sdk import LocalLLMClient
-        client = LocalLLMClient(
-            base_url="http://169.254.83.107:1234/v1",
-            timeout=300
-        )
-        # Register built-in tools
-        client.register_tools_from(None)
-        return client
+    def client(self, live_llm_client):
+        """Use centralized live LLM client from conftest (configured via .env)."""
+        return live_llm_client
 
     @pytest.fixture
-    def agent(self, client):
-        """Create a ReACT agent for testing."""
-        return ReACT(client)
+    def agent(self, live_react_agent):
+        """Use centralized live ReACT agent from conftest (configured via .env)."""
+        return live_react_agent
 
     def test_max_iterations_graceful_handling(self, agent):
         """

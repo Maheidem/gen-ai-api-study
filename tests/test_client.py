@@ -16,10 +16,17 @@ class TestLocalLLMClientInit:
 
     def test_init_with_defaults(self):
         """Test client initialization with default parameters."""
+        import os
         client = LocalLLMClient()
 
-        assert client.base_url == "http://localhost:1234/v1"
-        assert client.default_model is None
+        # Base URL may be loaded from .env (LLM_BASE_URL) or default to localhost
+        expected_base_url = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
+        assert client.base_url == expected_base_url
+
+        # Model may be None or loaded from .env (LLM_MODEL)
+        expected_model = os.getenv("LLM_MODEL")
+        assert client.default_model == expected_model
+
         assert client.last_tool_calls == []
         assert client.last_thinking == ""
         assert len(client.tools.list_tools()) == 0

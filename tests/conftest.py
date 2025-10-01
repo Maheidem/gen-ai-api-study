@@ -6,6 +6,11 @@ import pytest
 from unittest.mock import Mock, patch
 from typing import Dict, Any
 import json
+import os
+from dotenv import load_dotenv
+
+# Load .env file for consistent test configuration
+load_dotenv()
 
 from local_llm_sdk import LocalLLMClient
 from local_llm_sdk.models import (
@@ -300,3 +305,40 @@ def mock_react_agent(mock_client):
 def sample_agent_task():
     """Create a sample task string for agent testing."""
     return "Calculate 5 + 3 and tell me the result"
+
+
+# ============================================================================
+# Live LLM Testing Fixtures (uses .env configuration)
+# ============================================================================
+
+@pytest.fixture
+def live_llm_client():
+    """
+    Create a LocalLLMClient configured from .env for live LLM testing.
+
+    Requires:
+    - LLM_BASE_URL in .env (default: http://localhost:1234/v1)
+    - LLM_MODEL in .env (or auto-detection)
+    - LM Studio/Ollama running at configured URL
+    """
+    base_url = os.getenv("LLM_BASE_URL", "http://localhost:1234/v1")
+    model = os.getenv("LLM_MODEL")  # None triggers auto-detection
+    timeout = int(os.getenv("LLM_TIMEOUT", "300"))
+
+    client = LocalLLMClient(
+        base_url=base_url,
+        model=model,
+        timeout=timeout
+    )
+
+    # Register built-in tools for agent testing
+    client.register_tools_from(None)
+
+    return client
+
+
+@pytest.fixture
+def live_react_agent(live_llm_client):
+    """Create a ReACT agent with live LLM client for behavioral testing."""
+    from local_llm_sdk.agents import ReACT
+    return ReACT(live_llm_client)

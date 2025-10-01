@@ -47,7 +47,7 @@ This is a Generative AI API study repository that has evolved into **Local LLM S
 - **Python 3.12.11** with Pydantic v2 for type safety
 - **OpenAI API compatibility** (works with LM Studio, Ollama, LocalAI)
 - **MLflow integration** (optional) for tracing and observability
-- **Pytest** with ~213 unit tests + behavioral test suite
+- **Pytest** with 231 unit tests + 38 live LLM tests (behavioral + golden + notebooks)
 
 ## Study Approach
 
@@ -102,11 +102,12 @@ gen-ai-api-study/
 │   │   ├── registry.py       # Tool registry and decorator
 │   │   └── builtin.py        # Built-in tools (Python exec, file ops, etc.)
 │   └── utils/                 # Utility functions
-├── tests/                      # Comprehensive test suite (~213 tests)
+├── tests/                      # Comprehensive test suite (269 tests)
 │   ├── test_client.py         # Client functionality
 │   ├── test_agents.py         # Agent framework tests
 │   ├── test_agents_behavioral.py  # Behavioral tests (live LLM)
 │   ├── test_golden_dataset.py     # Regression tests with success rates
+│   ├── test_notebooks.py      # Notebook execution tests (11 notebooks, 10 passing)
 │   └── golden_dataset.json        # 16 known-good task examples
 ├── notebooks/                  # Educational Jupyter notebooks (11 total)
 │   ├── 01-installation-setup.ipynb
@@ -454,14 +455,14 @@ Traditional unit tests with mocks validate **code correctness** but miss **LLM b
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Tier 1: Unit Tests (213 tests) - Fast, Mocked              │
+│ Tier 1: Unit Tests (231 tests) - Fast, Mocked              │
 │ - Validates code logic                                      │
 │ - Run on every commit (<10s)                                │
 │ - Command: pytest tests/ -v                                 │
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Tier 2: Behavioral Tests (~20 tests) - Real LLM            │
+│ Tier 2: Behavioral Tests (9 tests) - Real LLM              │
 │ - Validates LLM behavior patterns                           │
 │ - Property-based assertions                                 │
 │ - Run nightly or on demand                                  │
@@ -469,11 +470,19 @@ Traditional unit tests with mocks validate **code correctness** but miss **LLM b
 └─────────────────────────────────────────────────────────────┘
                             ↓
 ┌─────────────────────────────────────────────────────────────┐
-│ Tier 3: Golden Dataset (~16 tests) - Regression Detection  │
+│ Tier 3: Golden Dataset (17 tests) - Regression Detection   │
 │ - Known-good task examples                                  │
 │ - Success rate tracking (≥90% threshold)                    │
 │ - Run weekly or before releases                             │
 │ - Command: pytest tests/ -m "live_llm and golden" -v        │
+└─────────────────────────────────────────────────────────────┘
+                            ↓
+┌─────────────────────────────────────────────────────────────┐
+│ Tier 4: Notebook Tests (11 tests, 10 passing) - Real LLM   │
+│ - End-to-end validation of educational notebooks            │
+│ - Ensures documentation matches reality                     │
+│ - Extended timeouts (up to 20 minutes for complex ones)     │
+│ - Command: pytest tests/test_notebooks.py -v                │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -488,6 +497,12 @@ pytest tests/ -m "live_llm and behavioral" -v
 # Golden dataset regression tests
 pytest tests/ -m "live_llm and golden" -v
 
+# Notebook tests (all 11 notebooks)
+pytest tests/test_notebooks.py -v
+
+# Specific notebook test
+pytest tests/test_notebooks.py::test_07_react_agents -v
+
 # Specific behavioral test
 pytest tests/test_agents_behavioral.py::TestReACTBehavior::test_multi_step_iteration_pattern -v
 
@@ -497,6 +512,33 @@ pytest tests/test_golden_dataset.py::test_golden_task[factorial_uppercase_count]
 # Success rate tests (slow)
 pytest tests/test_golden_dataset.py::TestGoldenDatasetSuccessRate -v
 ```
+
+### Notebook Testing
+
+**Current Status**: 91% pass rate (10/11 notebooks passing)
+
+The project includes comprehensive automated testing of all 11 educational notebooks with **REAL LLM execution**:
+
+**Why Test Notebooks?**
+- Validates examples work exactly as users will experience
+- Catches SDK API changes that break documentation
+- Ensures `.env` configuration works correctly
+- Tests real integration with LM Studio
+
+**Timeout Strategy:**
+- Basic notebooks: 180s (simple chat)
+- Tool notebooks: 240s (tool execution overhead)
+- Agent notebooks: 300s (multi-step iterations)
+- Production patterns: 600s (complex error handling)
+- Mini projects: 900-1200s (complex multi-agent tasks)
+
+**Recent Fixes (October 2025):**
+1. **Notebook 07** (react-agents): Added missing `_execute()` method, fixed ChatMessage access
+2. **Notebook 09** (production-patterns): Removed invalid SDK params, defined local exceptions
+3. **Notebook 10** (code-helper): Extended timeout to 15 minutes
+4. **Notebook 11** (data-analyzer): Extended timeout to 20 minutes, ready for testing
+
+See `tests/NOTEBOOK_TESTING_GUIDE.md` for complete details.
 
 **Note**: By default, `live_llm` tests are skipped (configured in pytest.ini). This keeps unit test runs fast.
 
@@ -698,10 +740,12 @@ def test_complex_task():
 
 ```
 tests/
-├── pytest.ini                    # Markers config (live_llm, behavioral, golden)
-├── test_agents_behavioral.py     # ~20 behavioral tests with real LLM
+├── pytest.ini                    # Markers config (live_llm, behavioral, golden, notebook)
+├── test_agents_behavioral.py     # 9 behavioral tests with real LLM
 ├── test_golden_dataset.py        # Golden dataset runner + success rate tests
+├── test_notebooks.py             # 11 notebook execution tests (10 passing)
 ├── golden_dataset.json           # 16 known-good tasks with properties
+├── NOTEBOOK_TESTING_GUIDE.md     # Complete notebook testing documentation
 └── conftest.py                   # Shared fixtures
 ```
 

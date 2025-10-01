@@ -289,10 +289,13 @@ class TestConvenienceFunctions:
 
     def test_create_client_with_defaults(self):
         """Test create_client with default parameters."""
+        import os
         client = create_client()
 
         assert client.base_url == "http://localhost:1234/v1"
-        assert client.default_model is None
+        # Model may be None or loaded from .env (LLM_MODEL)
+        expected_model = os.getenv("LLM_MODEL")
+        assert client.default_model == expected_model
 
     def test_quick_chat_function(self, mock_requests_post, mock_response_with_content):
         """Test the quick_chat convenience function."""
