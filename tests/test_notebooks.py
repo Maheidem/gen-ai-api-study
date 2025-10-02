@@ -162,7 +162,7 @@ def test_03_conversation_history(tb):
         pass
 
 
-@testbook(NOTEBOOKS_DIR / "04-tool-calling-basics.ipynb", execute=True, timeout=240)
+@testbook(NOTEBOOKS_DIR / "04-tool-calling-basics.ipynb", execute=True, timeout=3600)
 def test_04_tool_calling_basics(tb):
     """
     Execute notebook 04-tool-calling-basics.ipynb with REAL LLM.
@@ -173,6 +173,7 @@ def test_04_tool_calling_basics(tb):
     - Built-in tools execute correctly
 
     Requires: LM Studio running with tool-capable model
+    Note: Extended timeout for slower inference on new server
     """
     tb.inject(inject_env_config(), before=0)
 
@@ -202,7 +203,7 @@ def test_05_custom_tools(tb):
         pytest.fail(create_error_message("05-custom-tools.ipynb", e))
 
 
-@testbook(NOTEBOOKS_DIR / "06-filesystem-code-execution.ipynb", execute=True, timeout=240)
+@testbook(NOTEBOOKS_DIR / "06-filesystem-code-execution.ipynb", execute=True, timeout=3600)
 def test_06_filesystem_code_execution(tb):
     """
     Execute notebook 06-filesystem-code-execution.ipynb with REAL LLM.
@@ -213,6 +214,7 @@ def test_06_filesystem_code_execution(tb):
     - Real filesystem operations succeed
 
     Requires: LM Studio running
+    Note: Extended timeout for slower inference on new server
     """
     tb.inject(inject_env_config(), before=0)
 

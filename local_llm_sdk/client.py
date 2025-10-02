@@ -42,6 +42,9 @@ from .models import (
     EmbeddingsResponse
 )
 from .tools.registry import ToolRegistry
+from .utils.repetition_detector import RepetitionDetector
+from .utils.validators import ValidationPipeline
+from .utils.recovery import RecoveryManager
 
 
 class LocalLLMClient:
@@ -79,6 +82,43 @@ class LocalLLMClient:
         self.last_tool_calls = []  # Track tool calls from last request
         self.last_thinking = ""  # Track thinking blocks from last request
         self.last_conversation_additions = []  # Track additional messages from tool execution
+
+        # Initialize validation and recovery systems
+        self.config = config
+        self.enable_validation = config.get("enable_validation", True)
+        self.enable_recovery = config.get("enable_auto_recovery", True)
+
+        if self.enable_validation:
+            # Initialize repetition detector
+            self.repetition_detector = RepetitionDetector(
+                ngram_threshold=config.get("repetition_threshold", 0.5)
+            )
+
+            # Initialize judge client if enabled
+            judge_client = None
+            if config.get("enable_llm_judge", False):
+                judge_url = config.get("judge_url") or self.base_url
+                judge_model = config.get("judge_model", "phi-2")
+                judge_client = LocalLLMClient(judge_url, judge_model)
+
+            # Initialize validation pipeline
+            self.validators = ValidationPipeline(
+                tool_schemas=None,  # Will be updated when tools are registered
+                repetition_detector=self.repetition_detector,
+                judge_client=judge_client,
+                enable_judge=config.get("enable_llm_judge", False)
+            )
+
+        if self.enable_recovery:
+            # Initialize recovery manager
+            self.recovery_manager = RecoveryManager(
+                client=self,
+                max_attempts=config.get("max_recovery_attempts", 3)
+            )
+
+            # Checkpoint settings
+            self.checkpoint_interval = config.get("checkpoint_interval", 3)
+            self.message_count = 0
 
         # API endpoints
         self.endpoints = {
@@ -409,6 +449,13 @@ class LocalLLMClient:
                 "Or: client = LocalLLMClient(base_url='...', model='your-model-name')"
             )
 
+        # Safety: If validation enabled and no max_tokens set, use reasonable limit to prevent runaway generation
+        if self.enable_validation and max_tokens is None:
+            max_tokens = 2048  # Prevent 37,000 token repetition loops
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.debug(f"Validation enabled: Setting max_tokens={max_tokens} to prevent runaway generation")
+
         request = create_chat_completion_request(
             model=selected_model,
             messages=messages,
@@ -425,6 +472,32 @@ class LocalLLMClient:
 
         # Send request
         response = self._send_request(request)
+
+        # CRITICAL: Validate response IMMEDIATELY before any processing
+        if self.enable_validation and hasattr(self, 'validators'):
+            import logging
+            logger = logging.getLogger(__name__)
+
+            is_valid, error_type = self.validators.validate_all(response, self.default_model or "")
+
+            if not is_valid:
+                logger.error(f"🚨 VALIDATION FAILED: {error_type}")
+                print(f"\n🚨 ALERT: Response validation failed - {error_type}")
+                print(f"Response preview: {str(response.choices[0].message.content)[:200]}...")
+
+                # Attempt recovery if enabled
+                if self.enable_recovery and hasattr(self, 'recovery_manager'):
+                    print(f"🔧 Attempting recovery...")
+                    success, recovered = self.recovery_manager.recover(response, messages, error_type)
+
+                    if success:
+                        print(f"✅ Recovery successful!")
+                        response = recovered
+                    else:
+                        print(f"❌ Recovery failed: {recovered}")
+                        raise ValueError(f"Response validation failed ({error_type}) and recovery unsuccessful")
+                else:
+                    raise ValueError(f"Response validation failed: {error_type}")
 
         # Check for tool calls - structured or text-based
         message = response.choices[0].message
@@ -448,6 +521,12 @@ class LocalLLMClient:
             _, first_thinking = self._extract_thinking(first_content)
             if first_thinking:
                 self.last_thinking = first_thinking
+
+            # Save checkpoint before tool execution (if enabled)
+            if self.enable_recovery and hasattr(self, 'recovery_manager'):
+                self.message_count += 1
+                if self.message_count % self.checkpoint_interval == 0:
+                    self.recovery_manager.save_checkpoint(messages)
 
             # Get both response and full conversation state
             response, full_conversation_messages = self._handle_tool_calls(response, messages)
