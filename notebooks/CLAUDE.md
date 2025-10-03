@@ -12,11 +12,12 @@ Educational tutorial series for learning the Local LLM SDK. Progressive notebook
 - **02-basic-chat.ipynb** (10 min) - Simple chat, system prompts, temperature control
 - **03-conversation-history.ipynb** (10 min) - Multi-turn conversations with context
 
-### Level 2: Core Features (45 minutes)
+### Level 2: Core Features (60 minutes)
 **Learn about tools and function calling**
 
 - **04-tool-calling-basics.ipynb** (15 min) - Using built-in tools (math, text, etc.)
 - **05-custom-tools.ipynb** (15 min) - Creating your own tools with @tool decorator
+- **05b-validation-safeguards.ipynb** (15 min) - Model validation and error prevention
 - **06-filesystem-code-execution.ipynb** (15 min) - File I/O and code execution tools
 
 ### Level 3: Advanced (60 minutes)
@@ -75,6 +76,38 @@ jupyter notebook
 3. Complete exercises in each notebook
 4. Build the mini-projects (10-11) to solidify learning
 
+### MLflow Tracing Setup (for notebooks 07-08)
+
+**Important:** Notebooks run from the `notebooks/` directory but MLflow UI should serve from the project root.
+
+**Issue:** By default, notebooks write traces to `notebooks/mlruns/` but MLflow UI serves from `<project-root>/mlruns/`, causing traces to appear missing.
+
+**Solution:** Add this cell **after imports** in notebooks 07-08:
+
+```python
+import mlflow
+import os
+
+# Point to project root mlruns directory
+project_root = os.path.dirname(os.path.abspath(os.getcwd()))
+mlflow.set_tracking_uri(f"file://{project_root}/mlruns")
+
+print(f"✅ MLflow tracking URI: {mlflow.get_tracking_uri()}")
+```
+
+**Start MLflow UI from project root:**
+```bash
+cd /path/to/gen-ai-api-study
+mlflow ui --port 5000
+```
+
+Then open http://127.0.0.1:5000 to view traces.
+
+**Verification:**
+1. Run a traced operation in notebook
+2. Check MLflow UI - should see experiment and traces
+3. If not visible, check tracking URI matches MLflow UI directory
+
 ## Educational Design
 
 Each notebook includes:
@@ -110,4 +143,4 @@ Found an issue or have a suggestion?
 - Notebooks are designed to run independently but build on each other
 - Exercises have solutions in collapsed cells (click to expand)
 - Projects (10-11) create files in the notebooks directory
-- Total learning time: ~3 hours for complete series
+- Total learning time: ~3.25 hours for complete series

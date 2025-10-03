@@ -232,7 +232,7 @@ class LocalLLMClient:
 
         Usage:
             response = client.chat("What is 5 * 10?")
-            client.print_tool_calls()  # Shows: "🔧 Called math_calculator(arg1=5, arg2=10, operation=multiply) → result=50"
+            client.print_tool_calls()  # Shows: "🔧 Called bash(command="python -c 'print(5 * 10)'") → result=50"
         """
         if not self.last_tool_calls:
             print("ℹ️  No tools were called in the last request")

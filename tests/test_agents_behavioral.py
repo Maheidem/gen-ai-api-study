@@ -178,16 +178,16 @@ class TestReACTBehavior:
         assert result.iterations >= 2, \
             f"Expected at least 2 iterations for write+read, got {result.iterations}"
 
-        # Verify filesystem_operation tool was used at least twice (write + read)
-        filesystem_calls = 0
+        # Verify bash tool was used at least twice (write + read)
+        bash_calls = 0
         for msg in result.conversation:
             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                 for tc in msg.tool_calls:
-                    if tc.function.name == "filesystem_operation":
-                        filesystem_calls += 1
+                    if tc.function.name == "bash":
+                        bash_calls += 1
 
-        assert filesystem_calls >= 2, \
-            f"Expected at least 2 filesystem operations (write+read), got {filesystem_calls}"
+        assert bash_calls >= 2, \
+            f"Expected at least 2 bash operations (write+read), got {bash_calls}"
 
         # Final response should mention the content
         assert "Hello, World!" in result.final_response or "Hello" in result.final_response, \
@@ -263,9 +263,9 @@ class TestReACTBehavior:
 
     def test_python_execution_result_capture(self, agent):
         """
-        Verify execute_python tool captures results correctly.
+        Verify bash tool executes Python code correctly.
 
-        Property: Variable results should be captured even without print statements
+        Property: Python results should be captured via bash tool
         """
         task = "Use Python to calculate the factorial of 10"
 
@@ -279,16 +279,16 @@ class TestReACTBehavior:
         assert "3628800" in result.final_response, \
             f"Final response missing factorial result. Got: {result.final_response}"
 
-        # Verify execute_python was actually called
-        python_calls = 0
+        # Verify bash was actually called
+        bash_calls = 0
         for msg in result.conversation:
             if hasattr(msg, 'tool_calls') and msg.tool_calls:
                 for tc in msg.tool_calls:
-                    if tc.function.name == "execute_python":
-                        python_calls += 1
+                    if tc.function.name == "bash":
+                        bash_calls += 1
 
-        assert python_calls >= 1, \
-            f"Expected at least 1 execute_python call, got {python_calls}"
+        assert bash_calls >= 1, \
+            f"Expected at least 1 bash call, got {bash_calls}"
 
 
 @pytest.mark.live_llm

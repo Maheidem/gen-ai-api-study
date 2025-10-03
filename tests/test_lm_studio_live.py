@@ -186,7 +186,7 @@ class TestToolCalling(LMStudioTestBase):
 
         # Check if tool was actually used
         if self.client.last_tool_calls:
-            self.assert_tool_was_used("math_calculator")
+            self.assert_tool_was_used("bash")
             # Verify the result is correct (47 * 89 = 4183)
             numbers = extract_numbers_from_response(response)
             assert 4183 in numbers, f"Expected 4183 in response, got numbers: {numbers}"
@@ -248,7 +248,7 @@ class TestToolCalling(LMStudioTestBase):
         comparison = compare_tool_vs_direct_response(
             self.client,
             "What is 144 divided by 12?",
-            "math_calculator"
+            "bash"
         )
 
         print(f"\n⚖️ Tool vs Direct comparison:")

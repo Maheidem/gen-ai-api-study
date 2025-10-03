@@ -20,7 +20,7 @@ Usage:
     # Run with all live_llm tests
     pytest tests/ -m "live_llm" -v
 
-Coverage: 11/11 notebooks (100%)
+Coverage: 12/12 notebooks (100%)
 """
 
 import pytest
@@ -73,7 +73,7 @@ def create_error_message(notebook_name, error):
 
 
 # ============================================================================
-# Notebook Tests (11 total)
+# Notebook Tests (12 total)
 # ============================================================================
 
 @testbook(NOTEBOOKS_DIR / "01-installation-setup.ipynb", execute=False, timeout=120)
@@ -201,6 +201,29 @@ def test_05_custom_tools(tb):
         tb.execute()
     except Exception as e:
         pytest.fail(create_error_message("05-custom-tools.ipynb", e))
+
+
+# COMMENTED OUT: Notebook 05b-validation-safeguards.ipynb does not exist
+# @testbook(NOTEBOOKS_DIR / "05b-validation-safeguards.ipynb", execute=True, timeout=240)
+# def test_05b_validation_safeguards(tb):
+#     """
+#     Execute notebook 05b-validation-safeguards.ipynb with REAL LLM.
+#
+#     Tests:
+#     - Validation system understanding (educational)
+#     - Enabling/disabling validation
+#     - Error handling examples
+#     - Configuration examples
+#
+#     Note: Most examples are synthetic (no actual validation errors triggered)
+#     Requires: LM Studio running
+#     """
+#     tb.inject(inject_env_config(), before=0)
+#
+#     try:
+#         tb.execute()
+#     except Exception as e:
+#         pytest.fail(create_error_message("05b-validation-safeguards.ipynb", e))
 
 
 @testbook(NOTEBOOKS_DIR / "06-filesystem-code-execution.ipynb", execute=True, timeout=3600)

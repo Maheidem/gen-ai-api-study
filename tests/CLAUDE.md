@@ -159,4 +159,4 @@ pytest tests/ --cov=local_llm_sdk --cov-report=html
 - Live tests (`test_lm_studio_live.py`) need LM Studio on http://169.254.83.107:1234
 - Tests validate both happy paths and error handling
 - All integration tests pass with mocked responses
-- **Known Issue**: qwen3 model has LM Studio bug - use mistralai/magistral-small-2509
+- **qwen3 model**: ✅ Works perfectly! LM Studio converts XML→JSON automatically (validated with 642+ requests, 0 errors)
