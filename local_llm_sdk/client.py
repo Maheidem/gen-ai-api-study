@@ -42,9 +42,7 @@ from .models import (
     EmbeddingsResponse
 )
 from .tools.registry import ToolRegistry
-from .utils.repetition_detector import RepetitionDetector
-from .utils.validators import ValidationPipeline
-from .utils.recovery import RecoveryManager
+from .utils.streaming_validator import StreamingValidator
 
 
 class LocalLLMClient:
@@ -84,41 +82,15 @@ class LocalLLMClient:
         self.last_conversation_additions = []  # Track additional messages from tool execution
 
         # Initialize validation and recovery systems
+        # Initialize streaming validation (simplified from 950 lines to 150 lines)
         self.config = config
-        self.enable_validation = config.get("enable_validation", True)
-        self.enable_recovery = config.get("enable_auto_recovery", True)
+        self.enable_validation = config.get("enable_validation", False)  # Disabled by default
 
         if self.enable_validation:
-            # Initialize repetition detector
-            self.repetition_detector = RepetitionDetector(
-                ngram_threshold=config.get("repetition_threshold", 0.5)
-            )
-
-            # Initialize judge client if enabled
-            judge_client = None
-            if config.get("enable_llm_judge", False):
-                judge_url = config.get("judge_url") or self.base_url
-                judge_model = config.get("judge_model", "phi-2")
-                judge_client = LocalLLMClient(judge_url, judge_model)
-
-            # Initialize validation pipeline
-            self.validators = ValidationPipeline(
-                tool_schemas=None,  # Will be updated when tools are registered
-                repetition_detector=self.repetition_detector,
-                judge_client=judge_client,
-                enable_judge=config.get("enable_llm_judge", False)
-            )
-
-        if self.enable_recovery:
-            # Initialize recovery manager
-            self.recovery_manager = RecoveryManager(
-                client=self,
-                max_attempts=config.get("max_recovery_attempts", 3)
-            )
-
-            # Checkpoint settings
-            self.checkpoint_interval = config.get("checkpoint_interval", 3)
-            self.message_count = 0
+            check_interval = config.get("validation_check_interval", 20)
+            self.streaming_validator = StreamingValidator(check_interval=check_interval)
+        else:
+            self.streaming_validator = None
 
         # API endpoints
         self.endpoints = {
@@ -169,7 +141,20 @@ class LocalLLMClient:
             ├─ chat (iteration 2)
             ...
         """
+        # Create a parent span for grouping chat calls
         with mlflow.start_span(name=name, span_type="CHAIN"):
+            # Update the current trace to set a proper request preview/name
+            # This ensures MLflow UI shows the conversation name instead of "null"
+            try:
+                mlflow.update_current_trace(
+                    request_preview=f"Conversation: {name}",
+                    tags={"conversation_name": name, "trace_type": "grouped_conversation"}
+                )
+            except Exception:
+                # If update fails (no active trace, etc.), silently continue
+                # The span name will still provide some organization
+                pass
+
             yield self
 
     def register_tool(self, description: str = ""):
@@ -393,7 +378,7 @@ class LocalLLMClient:
         max_tokens: int = None,
         use_tools: bool = True,
         tool_choice: str = "auto",
-        stream: bool = False,
+        stream: bool = None,  # None = use config default
         return_full_response: bool = False,
         include_thinking: bool = False,
         **kwargs
@@ -456,6 +441,10 @@ class LocalLLMClient:
             logger = logging.getLogger(__name__)
             logger.debug(f"Validation enabled: Setting max_tokens={max_tokens} to prevent runaway generation")
 
+        # Use config default for stream if not explicitly provided
+        if stream is None:
+            stream = self.config.get("stream", False)
+
         request = create_chat_completion_request(
             model=selected_model,
             messages=messages,
@@ -473,31 +462,32 @@ class LocalLLMClient:
         # Send request
         response = self._send_request(request)
 
-        # CRITICAL: Validate response IMMEDIATELY before any processing
-        if self.enable_validation and hasattr(self, 'validators'):
-            import logging
-            logger = logging.getLogger(__name__)
+        # Simplified validation (replaces 950-line system with 150 lines)
+        if self.enable_validation and self.streaming_validator:
+            content = response.choices[0].message.content or ""
 
-            is_valid, error_type = self.validators.validate_all(response, self.default_model or "")
+            # Run validation checks on complete response
+            result = self.streaming_validator.add_chunk(content)
+            final_result = self.streaming_validator.finalize()
 
-            if not is_valid:
-                logger.error(f"🚨 VALIDATION FAILED: {error_type}")
-                print(f"\n🚨 ALERT: Response validation failed - {error_type}")
-                print(f"Response preview: {str(response.choices[0].message.content)[:200]}...")
+            if result.should_stop or final_result.should_stop:
+                error = result if result.should_stop else final_result
 
-                # Attempt recovery if enabled
-                if self.enable_recovery and hasattr(self, 'recovery_manager'):
-                    print(f"🔧 Attempting recovery...")
-                    success, recovered = self.recovery_manager.recover(response, messages, error_type)
+                # Fail fast with helpful error message
+                print(f"\n🚨 VALIDATION ERROR: {error.error_type}")
+                print(f"Model: {selected_model}")
+                print(f"Details: {error.details}")
+                print(f"Response preview: {content[:200]}...")
+                print(f"\n💡 Suggestion: Try a different model (e.g., mistralai/magistral-small-2509)")
 
-                    if success:
-                        print(f"✅ Recovery successful!")
-                        response = recovered
-                    else:
-                        print(f"❌ Recovery failed: {recovered}")
-                        raise ValueError(f"Response validation failed ({error_type}) and recovery unsuccessful")
-                else:
-                    raise ValueError(f"Response validation failed: {error_type}")
+                raise ValueError(
+                    f"Model response format incompatible: {error.error_type}\n"
+                    f"This model may not support the expected format.\n"
+                    f"Suggestion: Use a different model or disable validation."
+                )
+
+            # Reset validator for next request
+            self.streaming_validator.reset()
 
         # Check for tool calls - structured or text-based
         message = response.choices[0].message
@@ -522,14 +512,12 @@ class LocalLLMClient:
             if first_thinking:
                 self.last_thinking = first_thinking
 
-            # Save checkpoint before tool execution (if enabled)
-            if self.enable_recovery and hasattr(self, 'recovery_manager'):
-                self.message_count += 1
-                if self.message_count % self.checkpoint_interval == 0:
-                    self.recovery_manager.save_checkpoint(messages)
-
             # Get both response and full conversation state
-            response, full_conversation_messages = self._handle_tool_calls(response, messages)
+            response, full_conversation_messages = self._handle_tool_calls(
+                response,
+                messages,
+                tool_choice=tool_choice
+            )
 
             # Store the additional messages that were created during tool execution
             # These are: assistant_with_tool_calls + tool_result_messages + final_assistant
@@ -584,6 +572,10 @@ class LocalLLMClient:
         Raises:
             ConnectionError or Timeout after all retries are exhausted
         """
+        # If streaming is requested, use streaming handler
+        if request.stream:
+            return self._send_streaming_request(request, retry_count)
+
         import time
         from requests.exceptions import ConnectionError, Timeout
 
@@ -613,11 +605,160 @@ class LocalLLMClient:
         if last_error:
             raise last_error
 
+    @mlflow.trace(name="send_streaming_request", span_type="LLM")
+    def _send_streaming_request(self, request: ChatCompletionRequest, retry_count: int = 3) -> ChatCompletion:
+        """
+        Send streaming request to local LLM API with SSE parsing and validation.
+
+        Args:
+            request: The chat completion request to send (with stream=True)
+            retry_count: Number of retry attempts on connection failures (default: 3)
+
+        Returns:
+            ChatCompletion response assembled from streamed chunks
+
+        Raises:
+            ConnectionError or Timeout after all retries are exhausted
+            ValueError: If validation detects an error during streaming
+        """
+        import time
+        from requests.exceptions import ConnectionError, Timeout
+
+        last_error = None
+
+        for attempt in range(retry_count):
+            try:
+                # Make streaming request
+                response = requests.post(
+                    self.endpoints["chat"],
+                    json=request.model_dump(exclude_none=True),
+                    timeout=self.timeout,
+                    stream=True  # Enable streaming
+                )
+                response.raise_for_status()
+
+                # Parse SSE stream
+                accumulated_content = ""
+                finish_reason = None
+                model_name = None
+                chunk_count = 0
+
+                # Reset validator if enabled
+                if self.enable_validation and self.streaming_validator:
+                    self.streaming_validator.reset()
+
+                for line in response.iter_lines():
+                    if not line:
+                        continue
+
+                    # Decode bytes to string
+                    line_str = line.decode('utf-8') if isinstance(line, bytes) else line
+
+                    # SSE format: "data: {json}"
+                    if line_str.startswith('data: '):
+                        data_str = line_str[6:]  # Remove "data: " prefix
+
+                        # Check for stream end
+                        if data_str.strip() == '[DONE]':
+                            break
+
+                        # Parse chunk JSON
+                        try:
+                            chunk_data = json.loads(data_str)
+                        except json.JSONDecodeError:
+                            # Skip malformed chunks
+                            continue
+
+                        # Extract model name from first chunk
+                        if chunk_count == 0 and 'model' in chunk_data:
+                            model_name = chunk_data['model']
+
+                        # Extract content delta
+                        if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
+                            choice = chunk_data['choices'][0]
+
+                            # Get content delta
+                            delta = choice.get('delta', {})
+                            content_delta = delta.get('content', '')
+
+                            if content_delta:
+                                accumulated_content += content_delta
+                                chunk_count += 1
+
+                                # Run validation if enabled
+                                if self.enable_validation and self.streaming_validator:
+                                    validation_result = self.streaming_validator.add_chunk(content_delta)
+
+                                    if validation_result.should_stop:
+                                        # Early termination!
+                                        error_msg = f"🚨 VALIDATION ERROR: {validation_result.error_type}"
+                                        if validation_result.details:
+                                            error_msg += f"\n📋 Details: {validation_result.details}"
+                                        error_msg += f"\n\n💡 TIP: This is EARLY TERMINATION during streaming (stopped after {chunk_count} chunks)"
+
+                                        # Close the response stream
+                                        response.close()
+
+                                        raise ValueError(error_msg)
+
+                            # Get finish reason
+                            if 'finish_reason' in choice and choice['finish_reason']:
+                                finish_reason = choice['finish_reason']
+
+                # Assemble final ChatCompletion
+                # Use the model from chunks or request
+                final_model = model_name or request.model or self.default_model
+
+                # Create message
+                from .models import ChatMessage, ChatCompletionChoice, CompletionUsage
+
+                message = ChatMessage(
+                    role="assistant",
+                    content=accumulated_content
+                )
+
+                choice = ChatCompletionChoice(
+                    index=0,
+                    message=message,
+                    finish_reason=finish_reason or "stop"
+                )
+
+                # Create final response
+                completion = ChatCompletion(
+                    id=f"chatcmpl-streaming-{int(time.time())}",
+                    object="chat.completion",
+                    created=int(time.time()),
+                    model=final_model,
+                    choices=[choice],
+                    usage=CompletionUsage(
+                        prompt_tokens=0,  # Not available in streaming
+                        completion_tokens=chunk_count,
+                        total_tokens=chunk_count
+                    )
+                )
+
+                return completion
+
+            except (ConnectionError, Timeout) as e:
+                last_error = e
+                if attempt < retry_count - 1:
+                    wait_time = 2 ** attempt  # Exponential backoff: 1, 2, 4 seconds
+                    print(f"⚠ Connection failed, retrying in {wait_time}s... (attempt {attempt + 1}/{retry_count})")
+                    time.sleep(wait_time)
+                else:
+                    print(f"✗ Connection failed after {retry_count} attempts")
+                    raise
+
+        # Should never reach here, but for type safety
+        if last_error:
+            raise last_error
+
     @mlflow.trace(name="handle_tool_calls", span_type="AGENT")
     def _handle_tool_calls(
         self,
         response: ChatCompletion,
-        original_messages: List[ChatMessage]
+        original_messages: List[ChatMessage],
+        tool_choice: str = "auto"
     ) -> tuple[ChatCompletion, List[ChatMessage]]:
         """
         Handle tool calls and get final response with full conversation state.
@@ -679,6 +820,12 @@ class LocalLLMClient:
             messages=messages,
             temperature=0.7
         )
+
+        # CRITICAL: Include tools and tool_choice in follow-up request
+        # Without this, the LLM doesn't know tools exist and may output malformed XML
+        if self.tools.list_tools():
+            final_request.tools = self.tools.get_schemas()
+            final_request.tool_choice = tool_choice
 
         final_response = self._send_request(final_request)
 
