@@ -2,11 +2,15 @@
 Shared pytest fixtures for local-llm-sdk tests.
 """
 
+import os
+# Disable MLflow telemetry to prevent it from interfering with request mocks
+os.environ['MLFLOW_TELEMETRY_ENABLED'] = 'false'
+os.environ['MLFLOW_TRACKING_URI'] = ''
+
 import pytest
 from unittest.mock import Mock, patch
 from typing import Dict, Any
 import json
-import os
 from dotenv import load_dotenv
 
 # Load .env file for consistent test configuration
@@ -298,8 +302,13 @@ def mock_models_response():
 
 @pytest.fixture
 def mock_requests_post():
-    """Mock requests.post for API calls."""
-    with patch('requests.post') as mock_post:
+    """Mock requests.post for API calls.
+
+    Note: We patch 'local_llm_sdk.client.requests.post' instead of 'requests.post'
+    to avoid intercepting requests from other libraries (like MLflow telemetry).
+    MLflow telemetry is also disabled via environment variable in conftest.
+    """
+    with patch('local_llm_sdk.client.requests.post') as mock_post:
         yield mock_post
 
 

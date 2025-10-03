@@ -190,6 +190,8 @@ class TestThinkingStateManagement:
                 "finish_reason": "tool_calls"
             }]
         }
+        first_response.raise_for_status.return_value = None
+        add_streaming_support(first_response)
 
         # Mock final response after tool execution
         final_response = Mock()
@@ -207,6 +209,8 @@ class TestThinkingStateManagement:
                 "finish_reason": "stop"
             }]
         }
+        final_response.raise_for_status.return_value = None
+        add_streaming_support(final_response)
 
         # Mock tool execution
         with patch.object(mock_client.tools, 'execute', return_value='{"result": 42}'):
@@ -281,6 +285,8 @@ class TestThinkingIncludeParameter:
                 "finish_reason": "stop"
             }]
         }
+        thinking_only_response.raise_for_status.return_value = None
+        add_streaming_support(thinking_only_response)
 
         mock_requests_post.return_value = thinking_only_response
 
@@ -374,6 +380,8 @@ class TestThinkingParametrizedTests:
                 "finish_reason": "stop"
             }]
         }
+        thinking_response.raise_for_status.return_value = None
+        add_streaming_support(thinking_response)
 
         mock_requests_post.return_value = thinking_response
 
@@ -416,6 +424,8 @@ class TestThinkingIntegration:
                 "finish_reason": "tool_calls"
             }]
         }
+        first_response.raise_for_status.return_value = None
+        add_streaming_support(first_response)
 
         final_response = Mock()
         final_response.json.return_value = {
@@ -432,6 +442,8 @@ class TestThinkingIntegration:
                 "finish_reason": "stop"
             }]
         }
+        final_response.raise_for_status.return_value = None
+        add_streaming_support(final_response)
 
         mock_requests_post.side_effect = [first_response, final_response]
 
