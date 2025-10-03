@@ -4,8 +4,9 @@ Shared pytest fixtures for local-llm-sdk tests.
 
 import os
 # Disable MLflow telemetry to prevent it from interfering with request mocks
+# But allow tracking URI to be loaded from .env for live LLM tests
 os.environ['MLFLOW_TELEMETRY_ENABLED'] = 'false'
-os.environ['MLFLOW_TRACKING_URI'] = ''
+# DON'T set MLFLOW_TRACKING_URI here - let .env configure it
 
 import pytest
 from unittest.mock import Mock, patch
