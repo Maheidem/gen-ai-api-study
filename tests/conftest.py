@@ -75,11 +75,103 @@ def sample_chat_completion(sample_choice):
     )
 
 
+def add_streaming_support(mock_response):
+    """
+    Add streaming support to an existing mock response.
+
+    This helper automatically adds iter_lines() method to mock responses
+    created in tests, ensuring they work with streaming mode.
+
+    Args:
+        mock_response: Mock response object with json.return_value set
+
+    Returns:
+        The same mock_response with iter_lines() added
+    """
+    response_json = mock_response.json.return_value
+
+    # Create a callable that returns a new iterator each time
+    def iter_lines_func():
+        return iter(_create_streaming_iterator(response_json))
+
+    mock_response.iter_lines = iter_lines_func
+    return mock_response
+
+
+def _create_streaming_iterator(response_json: Dict[str, Any]) -> list:
+    """
+    Create SSE-formatted streaming chunks from a response JSON.
+
+    Args:
+        response_json: The complete chat completion response
+
+    Returns:
+        List of byte strings in SSE format
+    """
+    chunks = []
+    message = response_json["choices"][0]["message"]
+    content = message.get("content", "")
+    tool_calls = message.get("tool_calls")
+
+    # Stream content if present (split into words for realistic streaming)
+    if content:
+        words = content.split()
+        for i, word in enumerate(words):
+            chunk = {
+                "id": response_json["id"],
+                "object": "chat.completion.chunk",
+                "created": response_json["created"],
+                "model": response_json["model"],
+                "choices": [{
+                    "index": 0,
+                    "delta": {"content": word + (" " if i < len(words) - 1 else "")},
+                    "finish_reason": None
+                }]
+            }
+            chunks.append(f"data: {json.dumps(chunk)}".encode('utf-8'))
+
+    # Send tool_calls if present (in a separate chunk)
+    if tool_calls:
+        tool_calls_chunk = {
+            "id": response_json["id"],
+            "object": "chat.completion.chunk",
+            "created": response_json["created"],
+            "model": response_json["model"],
+            "choices": [{
+                "index": 0,
+                "delta": {
+                    "tool_calls": tool_calls
+                },
+                "finish_reason": None
+            }]
+        }
+        chunks.append(f"data: {json.dumps(tool_calls_chunk)}".encode('utf-8'))
+
+    # Final chunk with finish_reason
+    final_chunk = {
+        "id": response_json["id"],
+        "object": "chat.completion.chunk",
+        "created": response_json["created"],
+        "model": response_json["model"],
+        "choices": [{
+            "index": 0,
+            "delta": {},
+            "finish_reason": response_json["choices"][0]["finish_reason"]
+        }]
+    }
+    chunks.append(f"data: {json.dumps(final_chunk)}".encode('utf-8'))
+
+    # Stream end marker
+    chunks.append(b"data: [DONE]")
+
+    return chunks
+
+
 @pytest.fixture
 def mock_response_with_content():
     """Create a mock response with content only."""
     mock_response = Mock()
-    mock_response.json.return_value = {
+    response_json = {
         "id": "chatcmpl-123",
         "object": "chat.completion",
         "created": 1234567890,
@@ -98,7 +190,12 @@ def mock_response_with_content():
             "total_tokens": 15
         }
     }
+    mock_response.json.return_value = response_json
     mock_response.raise_for_status.return_value = None
+
+    # Add streaming support
+    add_streaming_support(mock_response)
+
     return mock_response
 
 
@@ -106,7 +203,7 @@ def mock_response_with_content():
 def mock_response_with_thinking():
     """Create a mock response with thinking blocks."""
     mock_response = Mock()
-    mock_response.json.return_value = {
+    response_json = {
         "id": "chatcmpl-123",
         "object": "chat.completion",
         "created": 1234567890,
@@ -125,7 +222,12 @@ def mock_response_with_thinking():
             "total_tokens": 15
         }
     }
+    mock_response.json.return_value = response_json
     mock_response.raise_for_status.return_value = None
+
+    # Add streaming support
+    add_streaming_support(mock_response)
+
     return mock_response
 
 
@@ -133,7 +235,7 @@ def mock_response_with_thinking():
 def mock_response_with_tool_calls():
     """Create a mock response with tool calls."""
     mock_response = Mock()
-    mock_response.json.return_value = {
+    response_json = {
         "id": "chatcmpl-123",
         "object": "chat.completion",
         "created": 1234567890,
@@ -160,7 +262,12 @@ def mock_response_with_tool_calls():
             "total_tokens": 15
         }
     }
+    mock_response.json.return_value = response_json
     mock_response.raise_for_status.return_value = None
+
+    # Add streaming support
+    add_streaming_support(mock_response)
+
     return mock_response
 
 

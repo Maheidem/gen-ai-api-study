@@ -6,6 +6,12 @@ Tests full workflows and real scenarios.
 import pytest
 from unittest.mock import Mock, patch
 import json
+import sys
+import os
+
+# Add tests directory to path to import conftest
+sys.path.insert(0, os.path.dirname(__file__))
+from conftest import add_streaming_support
 
 from local_llm_sdk import LocalLLMClient, create_client, quick_chat
 from local_llm_sdk.tools import builtin
@@ -37,8 +43,8 @@ class TestFullWorkflowIntegration:
                         "id": "call_123",
                         "type": "function",
                         "function": {
-                            "name": "math_calculator",
-                            "arguments": '{"arg1": 15.0, "arg2": 23.0, "operation": "multiply"}'
+                            "name": "bash",
+                            "arguments": '{"command": "python -c \\"print(15 * 23)\\""}'
                         }
                     }]
                 },
@@ -70,7 +76,7 @@ class TestFullWorkflowIntegration:
         # Verify the complete workflow
         assert response == "The result is 345."
         assert len(client.last_tool_calls) == 1
-        assert client.last_tool_calls[0].function.name == "math_calculator"
+        assert client.last_tool_calls[0].function.name == "bash"
 
         # Verify thinking was accumulated
         expected_thinking = "I need to calculate 15 * 23\n\nThe calculation returned 345"
@@ -172,6 +178,7 @@ class TestFullWorkflowIntegration:
             response = Mock()
             response.json.return_value = responses.pop(0)
             response.raise_for_status.return_value = None
+            add_streaming_support(response)
             return response
 
         mock_requests_post.side_effect = mock_response_side_effect
@@ -219,8 +226,8 @@ class TestErrorHandlingIntegration:
                         "id": "call_123",
                         "type": "function",
                         "function": {
-                            "name": "math_calculator",
-                            "arguments": '{"arg1": 10.0, "arg2": 0.0, "operation": "divide"}'
+                            "name": "bash",
+                            "arguments": '{"command": "python -c \\"print(10 / 0)\\""}'
                         }
                     }]
                 },
@@ -442,12 +449,12 @@ class TestComplexScenarios:
 
         # Verify both types of tools are available
         tools = client.tools.list_tools()
-        assert "math_calculator" in tools  # builtin
+        assert "bash" in tools  # builtin
         assert "generate_greeting" in tools  # custom
 
         # Test tool schemas are properly generated
         schemas = client.tools.get_schemas()
-        assert len(schemas) > 4  # Should have multiple tools
+        assert len(schemas) >= 2  # Should have bash + custom tool
 
     def test_long_conversation_with_state_management(self, mock_requests_post):
         """Test long conversation maintaining state correctly."""
@@ -479,6 +486,7 @@ class TestComplexScenarios:
                 }]
             }
             response.raise_for_status.return_value = None
+            add_streaming_support(response)
             return response
 
         mock_requests_post.side_effect = [

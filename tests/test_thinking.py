@@ -4,6 +4,12 @@ Tests specifically for thinking blocks extraction functionality.
 
 import pytest
 from unittest.mock import Mock, patch
+import sys
+import os
+
+# Add tests directory to path to import conftest
+sys.path.insert(0, os.path.dirname(__file__))
+from conftest import add_streaming_support
 
 from local_llm_sdk import LocalLLMClient
 from local_llm_sdk.models import ChatCompletion, ChatCompletionChoice, ChatMessage

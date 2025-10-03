@@ -639,6 +639,7 @@ class LocalLLMClient:
 
                 # Parse SSE stream
                 accumulated_content = ""
+                accumulated_tool_calls = None  # Will be set if tool_calls are present
                 finish_reason = None
                 model_name = None
                 chunk_count = 0
@@ -673,14 +674,15 @@ class LocalLLMClient:
                         if chunk_count == 0 and 'model' in chunk_data:
                             model_name = chunk_data['model']
 
-                        # Extract content delta
+                        # Extract content and tool_calls from delta
                         if 'choices' in chunk_data and len(chunk_data['choices']) > 0:
                             choice = chunk_data['choices'][0]
 
-                            # Get content delta
+                            # Get delta
                             delta = choice.get('delta', {})
-                            content_delta = delta.get('content', '')
 
+                            # Extract content delta
+                            content_delta = delta.get('content', '')
                             if content_delta:
                                 accumulated_content += content_delta
                                 chunk_count += 1
@@ -701,6 +703,10 @@ class LocalLLMClient:
 
                                         raise ValueError(error_msg)
 
+                            # Extract tool_calls delta
+                            if 'tool_calls' in delta:
+                                accumulated_tool_calls = delta['tool_calls']
+
                             # Get finish reason
                             if 'finish_reason' in choice and choice['finish_reason']:
                                 finish_reason = choice['finish_reason']
@@ -710,12 +716,23 @@ class LocalLLMClient:
                 final_model = model_name or request.model or self.default_model
 
                 # Create message
-                from .models import ChatMessage, ChatCompletionChoice, CompletionUsage
+                from .models import ChatMessage, ChatCompletionChoice, CompletionUsage, ToolCall
 
-                message = ChatMessage(
-                    role="assistant",
-                    content=accumulated_content
-                )
+                # Build message with tool_calls if present
+                message_kwargs = {
+                    "role": "assistant",
+                    "content": accumulated_content or None
+                }
+
+                if accumulated_tool_calls:
+                    # Convert to ToolCall objects
+                    tool_call_objects = [
+                        ToolCall.model_validate(tc) if isinstance(tc, dict) else tc
+                        for tc in accumulated_tool_calls
+                    ]
+                    message_kwargs["tool_calls"] = tool_call_objects
+
+                message = ChatMessage(**message_kwargs)
 
                 choice = ChatCompletionChoice(
                     index=0,

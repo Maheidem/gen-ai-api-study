@@ -9,6 +9,12 @@ OpenAI-formatted message history including tool results.
 import pytest
 from unittest.mock import Mock, patch
 import json
+import sys
+import os
+
+# Add tests directory to path to import conftest
+sys.path.insert(0, os.path.dirname(__file__))
+from conftest import add_streaming_support
 
 from local_llm_sdk import LocalLLMClient, create_chat_message
 from local_llm_sdk.models import ChatCompletion, ChatMessage
@@ -71,6 +77,7 @@ class TestHandleToolCallsReturnType:
             }
         }
         mock_final_response.raise_for_status.return_value = None
+        add_streaming_support(mock_final_response)
 
         with patch('requests.post', return_value=mock_final_response):
             original_messages = [create_chat_message("user", "What is 5+3?")]
@@ -128,6 +135,7 @@ class TestConversationAdditionsPopulated:
             }
         }
         mock_final_response.raise_for_status.return_value = None
+        add_streaming_support(mock_final_response)
 
         mock_requests_post.side_effect = [
             mock_response_with_tool_calls,  # First: tool calls
@@ -173,6 +181,7 @@ class TestConversationAdditionsStructure:
             }
         }
         mock_final_response.raise_for_status.return_value = None
+        add_streaming_support(mock_final_response)
 
         mock_requests_post.side_effect = [
             mock_response_with_tool_calls,  # First: tool calls
@@ -254,6 +263,7 @@ class TestConversationAdditionsMultipleTools:
             }
         }
         mock_multi_tool_response.raise_for_status.return_value = None
+        add_streaming_support(mock_multi_tool_response)
 
         # Mock final response
         mock_final_response = Mock()
@@ -277,6 +287,7 @@ class TestConversationAdditionsMultipleTools:
             }
         }
         mock_final_response.raise_for_status.return_value = None
+        add_streaming_support(mock_final_response)
 
         mock_requests_post.side_effect = [
             mock_multi_tool_response,  # First: multiple tool calls
@@ -350,6 +361,7 @@ class TestConversationStateInReactAgent:
             }
         }
         mock_tool_response.raise_for_status.return_value = None
+        add_streaming_support(mock_tool_response)
 
         # Mock final response
         mock_final_response = Mock()
@@ -373,6 +385,7 @@ class TestConversationStateInReactAgent:
             }
         }
         mock_final_response.raise_for_status.return_value = None
+        add_streaming_support(mock_final_response)
 
         mock_requests_post.side_effect = [
             mock_tool_response,   # First iteration: tool call
@@ -426,6 +439,7 @@ class TestToolResultMessages:
             }
         }
         mock_final_response.raise_for_status.return_value = None
+        add_streaming_support(mock_final_response)
 
         mock_requests_post.side_effect = [
             mock_response_with_tool_calls,  # First: tool calls
@@ -487,6 +501,7 @@ class TestConversationContinuity:
             }
         }
         mock_final_response.raise_for_status.return_value = None
+        add_streaming_support(mock_final_response)
 
         mock_requests_post.side_effect = [
             mock_response_with_tool_calls,  # First: tool calls
