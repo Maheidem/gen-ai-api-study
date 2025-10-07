@@ -5,10 +5,14 @@ A type-safe Python SDK for interacting with local LLM APIs that implement the Op
 ## Features
 
 - 🔒 **Type-Safe**: Full Pydantic model validation
-- 🛠️ **Tool Support**: Simple decorator-based tool/function calling
+- 🛠️ **Unified Tool System**: Single bash tool with full terminal capabilities
 - 🚀 **Easy to Use**: Clean, intuitive API
 - 🔌 **OpenAI Compatible**: Works with LM Studio, Ollama, and other OpenAI-compatible servers
-- 📦 **Extensible**: Easy to add new tools and capabilities
+- 📦 **Extensible**: Easy to add custom tools and capabilities
+- 🌊 **Streaming Support**: Real-time response streaming with SSE parsing
+- ✅ **Early Termination**: Automatic validation with early stopping for bad outputs
+- 🤖 **ReACT Agents**: Built-in multi-step reasoning and acting pattern
+- 📊 **MLflow Integration**: Optional tracing for observability
 
 ## Installation
 
@@ -67,20 +71,34 @@ client = LocalLLMClient(
 
 ## Tool Usage
 
-### Using Built-in Tools
+### Using the Unified Bash Tool
+
+The SDK includes a powerful unified `bash` tool that handles ALL terminal operations:
 
 ```python
-from local_llm_sdk import LocalLLMClient
-from local_llm_sdk.tools import builtin
+from local_llm_sdk import create_client_with_tools
 
-# Create client with tools
-client = LocalLLMClient()
-client.register_tools_from(builtin)
+# Create client with unified bash tool
+client = create_client_with_tools()
 
 # Tools are automatically used when needed
-response = client.chat("What is 42 times 17?")
-print(response)  # Will use the math calculator tool
+response = client.chat("What is 42 times 17?", use_tools=True)
+print(response)  # LLM uses bash tool: python -c 'print(42 * 17)'
+
+# See which commands were executed
+client.print_tool_calls()
+# Output:
+# 🔧 Tool Execution Summary (1 call):
+# ======================================================================
+#   [1] bash(command="python -c 'print(42 * 17)'") → captured_result=714
+# ======================================================================
 ```
+
+**What the bash tool can do:**
+- Mathematics: `python -c 'print(42 * 17)'`, `python -c 'import math; print(math.factorial(5))'`
+- File operations: `cat file.txt`, `echo 'data' > file.txt`, `cp src.txt dst.txt`
+- Text processing: `echo 'hello' | tr '[:lower:]' '[:upper:]'`, `wc -c < file.txt`
+- Command chaining: `mkdir temp && echo 'data' > temp/file.txt && cat temp/file.txt`
 
 ### Creating Custom Tools
 
@@ -188,6 +206,10 @@ LLM_DEBUG=false
 | `LLM_MODEL` | `auto` | Model to use (or "auto" for auto-detection) |
 | `LLM_TIMEOUT` | `300` | Request timeout in seconds |
 | `LLM_DEBUG` | `false` | Enable debug logging |
+| `LLM_STREAM` | `false` | Enable streaming responses (SSE format) |
+| `LLM_ENABLE_VALIDATION` | `false` | Enable early termination validation |
+| `LLM_VALIDATION_CHECK_INTERVAL` | `20` | Validation frequency (tokens) |
+| `LLM_MAX_TOOL_ITERATIONS` | `10` | Maximum tool execution loops |
 
 **Using Environment Variables:**
 
@@ -226,17 +248,80 @@ load_dotenv(".env.production")
 
 **Important:** Add `.env` to `.gitignore` to avoid committing secrets. Provide a `.env.example` for documentation.
 
+## Streaming and Validation
+
+### Overview
+
+The SDK supports **streaming responses** with **real-time validation** for early termination of problematic generations. This can save 70-80% of time when models produce bad outputs.
+
+### Basic Streaming
+
+```python
+import os
+os.environ['LLM_STREAM'] = 'true'
+
+from local_llm_sdk import LocalLLMClient
+client = LocalLLMClient()
+
+# Responses are streamed chunk-by-chunk
+response = client.chat("Tell me a story")
+```
+
+### Streaming with Validation (Early Termination)
+
+```python
+import os
+os.environ['LLM_STREAM'] = 'true'
+os.environ['LLM_ENABLE_VALIDATION'] = 'true'
+os.environ['LLM_VALIDATION_CHECK_INTERVAL'] = '20'  # Check every 20 tokens
+
+from local_llm_sdk import LocalLLMClient
+client = LocalLLMClient()
+
+try:
+    response = client.chat("Repeat the word 'test' exactly 100 times")
+except ValueError as e:
+    # Validation caught REPETITION during streaming!
+    # Stopped after ~20 chunks instead of 100+ (saves 80% time)
+    print(f"Caught error: {e}")
+```
+
+**What Validation Detects:**
+- **XML_DRIFT**: Model outputs XML instead of JSON (format mismatch)
+- **REPETITION**: Model stuck in repetition loop ("test test test...")
+
+**When to Use:**
+- Testing new models for compatibility
+- Preventing runaway generations (37,000+ token loops)
+- Production environments needing reliability
+- Any scenario where you want to fail fast on bad outputs
+
+**Configuration:**
+```bash
+export LLM_STREAM="true"                          # Enable streaming
+export LLM_ENABLE_VALIDATION="true"               # Enable early termination
+export LLM_VALIDATION_CHECK_INTERVAL="20"         # Check frequency (tokens)
+```
+
+See `docs/getting-started/configuration.md` for complete details.
+
 ## Project Structure
 
 ```
 local_llm_sdk/
-├── __init__.py         # Package exports
-├── client.py           # Main client implementation
-├── models.py           # Pydantic models (OpenAI spec)
-├── tools/
-│   ├── registry.py     # Tool registration system
-│   └── builtin.py      # Built-in tools
-└── utils/              # Utility functions
+├── __init__.py              # Package exports and convenience functions
+├── client.py                # LocalLLMClient with streaming and tool support
+├── models.py                # Pydantic models (OpenAI specification)
+├── config.py                # Configuration management (env vars)
+├── agents/                  # Agent framework
+│   ├── base.py             # BaseAgent with MLflow tracing
+│   ├── react.py            # ReACT agent implementation
+│   └── models.py           # AgentResult, AgentStatus
+├── tools/                   # Tool system
+│   ├── registry.py         # ToolRegistry and schema generation
+│   └── builtin.py          # Unified bash tool (full terminal)
+└── utils/                   # Utility functions
+    └── streaming_validator.py  # StreamingValidator for early termination
 ```
 
 ## 📚 Educational Notebooks

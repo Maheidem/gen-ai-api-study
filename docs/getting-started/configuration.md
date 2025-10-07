@@ -20,6 +20,14 @@ export LLM_BASE_URL="http://localhost:1234/v1"    # Server URL
 export LLM_MODEL="auto"                            # Model name
 export LLM_TIMEOUT="300"                           # Request timeout (seconds)
 export LLM_DEBUG="false"                           # Enable debug logging
+
+# Streaming and Validation (Advanced)
+export LLM_STREAM="false"                          # Enable streaming responses (SSE format)
+export LLM_ENABLE_VALIDATION="false"               # Enable early termination validation
+export LLM_VALIDATION_CHECK_INTERVAL="20"          # Validation frequency (tokens)
+
+# Tool Execution
+export LLM_MAX_TOOL_ITERATIONS="10"                # Maximum tool execution loops
 ```
 
 ### Example Configurations
@@ -93,6 +101,114 @@ client = create_client_with_tools(
     model="auto"
 )
 ```
+
+## Streaming and Validation
+
+### Overview
+
+The SDK supports **streaming responses** with **real-time validation** for early termination of problematic generations. This is an advanced feature that can save significant time when models produce bad outputs.
+
+### Streaming (LLM_STREAM)
+
+**Description**: Enable Server-Sent Events (SSE) streaming for incremental response generation
+
+**Default**: `false` (disabled for backward compatibility)
+
+**When to Enable**:
+- You want to see responses as they're generated
+- You're using validation for early termination
+- You need to process partial responses
+
+**Example**:
+```python
+import os
+os.environ['LLM_STREAM'] = 'true'
+
+from local_llm_sdk import LocalLLMClient
+client = LocalLLMClient()
+
+# Responses are now streamed chunk-by-chunk
+response = client.chat("Tell me a story")
+```
+
+**Note**: Streaming is automatically used when `LLM_ENABLE_VALIDATION=true` regardless of this setting.
+
+### Validation (LLM_ENABLE_VALIDATION)
+
+**Description**: Enable real-time validation during generation with early termination
+
+**Default**: `false` (disabled for backward compatibility)
+
+**What it Does**:
+- Detects **XML_DRIFT**: Model outputs XML instead of JSON (format mismatch)
+- Detects **REPETITION**: Model stuck in repetition loop ("the the the...")
+- **Stops generation immediately** when issues detected (saves 70-80% time)
+
+**When to Enable**:
+- Testing new models for compatibility
+- Preventing runaway generations (37,000 token loops)
+- Production environments needing reliability
+
+**Example**:
+```python
+import os
+os.environ['LLM_ENABLE_VALIDATION'] = 'true'
+os.environ['LLM_VALIDATION_CHECK_INTERVAL'] = '20'  # Check every 20 tokens
+
+from local_llm_sdk import LocalLLMClient
+client = LocalLLMClient()
+
+try:
+    response = client.chat("Repeat 'test' 100 times")
+except ValueError as e:
+    # Validation caught REPETITION!
+    # Early termination after ~20 chunks instead of 100+
+    print(f"Caught error: {e}")
+```
+
+**Validation Results**:
+```
+🚨 VALIDATION ERROR: REPETITION
+Model: mistralai/magistral-small-2509
+Details: Detected repeating pattern: test test test test test...
+Response preview: test test test test test...
+
+💡 TIP: This is EARLY TERMINATION during streaming (stopped after 21 chunks)
+```
+
+### Validation Check Interval (LLM_VALIDATION_CHECK_INTERVAL)
+
+**Description**: How often to check for validation issues (in tokens)
+
+**Default**: `20` tokens
+
+**Tuning**:
+- Lower (5-10): Faster detection, higher overhead
+- Default (20): Balanced
+- Higher (50-100): Slower detection, lower overhead
+
+### Max Tool Iterations (LLM_MAX_TOOL_ITERATIONS)
+
+**Description**: Maximum number of tool execution loops before stopping
+
+**Default**: `10` iterations
+
+**Why it Matters**: Prevents infinite loops when model repeatedly calls tools without completing task
+
+**Example**:
+```python
+import os
+os.environ['LLM_MAX_TOOL_ITERATIONS'] = '5'  # Stricter limit
+
+from local_llm_sdk import LocalLLMClient
+client = LocalLLMClient()
+client.register_tools_from(None)
+
+# Will stop after 5 tool iterations even if task incomplete
+response = client.chat("Complex multi-step task", use_tools=True)
+```
+
+---
 
 ## Configuration Options
 
