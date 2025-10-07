@@ -80,7 +80,7 @@ class TestLocalLLMClientToolRegistration:
         tools = mock_client.tools.list_tools()
         # Should have at least the builtin tools
         assert len(tools) > 0
-        assert "math_calculator" in tools
+        assert "bash" in tools
 
     def test_multiple_tool_registration(self, mock_client):
         """Test registering multiple tools."""
@@ -314,7 +314,7 @@ class TestLocalLLMClientToolChoice:
         mock_requests_post.return_value = mock_response_with_content
         mock_client.register_tools_from(None)
 
-        specific_tool = {"type": "function", "function": {"name": "math_calculator"}}
+        specific_tool = {"type": "function", "function": {"name": "bash"}}
         mock_client.chat("Calculate", use_tools=True, tool_choice=specific_tool)
 
         call_args = mock_requests_post.call_args
@@ -527,6 +527,48 @@ class TestLocalLLMClientNewFeatures:
         assert hasattr(mock_client, 'react')
         assert callable(mock_client.react)
 
+    def test_react_with_model_override(self, mock_client):
+        """Test that react() method accepts and passes through model parameter."""
+        from unittest.mock import Mock, patch
+        from local_llm_sdk.models import ChatCompletion, ChatMessage, ChatCompletionChoice
+
+        # Mock the chat method to capture calls
+        original_chat = mock_client.chat
+        chat_calls = []
+
+        def capture_chat(*args, **kwargs):
+            chat_calls.append(kwargs)
+            # Return a valid mock response
+            mock_response = Mock(spec=ChatCompletion)
+            mock_message = Mock(spec=ChatMessage)
+            mock_message.content = "Task completed. TASK_COMPLETE"
+            mock_message.tool_calls = None
+            mock_choice = Mock(spec=ChatCompletionChoice)
+            mock_choice.message = mock_message
+            mock_response.choices = [mock_choice]
+            return mock_response
+
+        mock_client.chat = capture_chat
+        mock_client.last_conversation_additions = None
+
+        # Call react with custom model
+        result = mock_client.react(
+            task="Test task",
+            max_iterations=5,
+            model="custom-model-name",
+            verbose=False
+        )
+
+        # Verify model parameter was passed to chat
+        assert len(chat_calls) > 0
+        first_call = chat_calls[0]
+        assert 'model' in first_call
+        assert first_call['model'] == "custom-model-name"
+
+        # Verify result is valid
+        assert result is not None
+        assert result.success is True
+
 
 class TestLocalLLMClientRegisterTools:
     """Test register_tools() method for registering tools from a list."""
@@ -674,3 +716,495 @@ class TestLocalLLMClientRegisterTools:
 
         assert result is mock_client
         assert len(mock_client.tools.list_tools()) == 2
+
+
+class TestLocalLLMClientXMLToolCallParsing:
+    """Test XML-based tool call parsing (granite format)."""
+
+    def test_parse_xml_tool_calls_basic(self, mock_client):
+        """Test parsing <tool_call>{"name": "...", "arguments": {...}}</tool_call> format."""
+        mock_client.register_tools_from(builtin)
+
+        # Granite outputs this format
+        content = '<tool_call>\n{"name": "bash", "arguments": "{\\\"command\\\":\\\"echo 4\\\"}"}\n</tool_call>'
+
+        tool_calls = mock_client._parse_text_tool_calls(content)
+
+        assert len(tool_calls) == 1
+        assert tool_calls[0].function.name == "bash"
+        assert "command" in tool_calls[0].function.arguments
+        assert "echo 4" in tool_calls[0].function.arguments
+
+    def test_parse_xml_tool_calls_with_nested_json(self, mock_client):
+        """Test parsing XML tool calls with complex nested JSON arguments."""
+        mock_client.register_tools_from(builtin)
+
+        content = '''<tool_call>
+{"name": "bash", "arguments": "{\\"command\\":\\"expr 2 + 2\\",\\"timeout\\":10}"}
+</tool_call>'''
+
+        tool_calls = mock_client._parse_text_tool_calls(content)
+
+        assert len(tool_calls) == 1
+        assert tool_calls[0].function.name == "bash"
+        # Arguments should be JSON string containing the command
+        args = json.loads(tool_calls[0].function.arguments)
+        assert args["command"] == "expr 2 + 2"
+        assert args["timeout"] == 10
+
+    def test_parse_xml_tool_calls_unregistered_tool(self, mock_client):
+        """Test that unregistered tools are skipped."""
+        mock_client.register_tools_from(builtin)
+
+        content = '<tool_call>\n{"name": "nonexistent_tool", "arguments": "{}"}\n</tool_call>'
+
+        tool_calls = mock_client._parse_text_tool_calls(content)
+
+        assert len(tool_calls) == 0
+
+    def test_parse_xml_tool_calls_multiple(self, mock_client):
+        """Test parsing multiple XML tool calls in same content."""
+        mock_client.register_tools_from(builtin)
+
+        content = '''Some text before
+<tool_call>
+{"name": "bash", "arguments": "{\\"command\\":\\"echo 1\\"}"}
+</tool_call>
+Some text in between
+<tool_call>
+{"name": "bash", "arguments": "{\\"command\\":\\"echo 2\\"}"}
+</tool_call>'''
+
+        tool_calls = mock_client._parse_text_tool_calls(content)
+
+        assert len(tool_calls) == 2
+        assert all(tc.function.name == "bash" for tc in tool_calls)
+
+    def test_parse_xml_tool_calls_malformed(self, mock_client):
+        """Test that malformed XML tool calls are skipped gracefully."""
+        mock_client.register_tools_from(builtin)
+
+        content = '<tool_call>not valid json</tool_call>'
+
+        tool_calls = mock_client._parse_text_tool_calls(content)
+
+        assert len(tool_calls) == 0
+
+    def test_parse_xml_and_bracket_formats(self, mock_client):
+        """Test that both XML and bracket formats can coexist."""
+        mock_client.register_tools_from(builtin)
+
+        content = '''<tool_call>
+{"name": "bash", "arguments": "{\\"command\\":\\"echo xml\\"}"}
+</tool_call>
+[TOOL_CALLS]bash[ARGS]{"command":"echo bracket"}'''
+
+        tool_calls = mock_client._parse_text_tool_calls(content)
+
+        # Should parse both formats
+        assert len(tool_calls) == 2
+        assert all(tc.function.name == "bash" for tc in tool_calls)
+
+
+class TestSequentialToolCalling:
+    """Test sequential tool calling support (granite pattern)."""
+
+    def test_sequential_tool_calling(self, mock_client, mock_requests_post, add_streaming_support_fixture):
+        """Test sequential tool calling where model returns one tool at a time."""
+        add_streaming_support = add_streaming_support_fixture
+        from local_llm_sdk.models import ToolCall, FunctionCall
+
+        mock_client.register_tools_from(builtin)
+
+        # Simulate granite pattern: 3 sequential tool calls
+        responses = [
+            # Response 1: First tool call
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-1",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "<tool_call>{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"echo first\\\"}\"}</tool_call>",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            }))),
+            # Response 2: Tool result leads to second tool call
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-2",
+                "object": "chat.completion",
+                "created": 1234567891,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "<tool_call>{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"echo second\\\"}\"}</tool_call>",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            }))),
+            # Response 3: Tool result leads to third tool call
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-3",
+                "object": "chat.completion",
+                "created": 1234567892,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "<tool_call>{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"echo third\\\"}\"}</tool_call>",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            }))),
+            # Response 4: Final response (no tool calls)
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-4",
+                "object": "chat.completion",
+                "created": 1234567893,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "All done!",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            })))
+        ]
+
+        mock_requests_post.side_effect = responses
+
+        result = mock_client.chat("Do sequential tasks", use_tools=True)
+
+        # Should have made 4 API calls (3 tool iterations + 1 final)
+        assert mock_requests_post.call_count == 4
+
+        # Should accumulate tool calls from iterations (first triggers loop, then accumulates rest)
+        assert len(mock_client.last_tool_calls) >= 2  # At least 2 tool calls accumulated
+        assert all(tc.function.name == "bash" for tc in mock_client.last_tool_calls)
+
+        # Final response should be clean
+        assert result == "All done!"
+
+    def test_batch_tool_calling_still_works(self, mock_client, mock_requests_post, add_streaming_support_fixture):
+        """Test that batch tool calling (qwen3/mistral pattern) still works."""
+        add_streaming_support = add_streaming_support_fixture
+        from local_llm_sdk.models import ToolCall, FunctionCall
+
+        mock_client.register_tools_from(builtin)
+
+        # Response 1: All tools at once (batch pattern)
+        response1 = add_streaming_support(Mock(json=Mock(return_value={
+            "id": "chatcmpl-1",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "qwen3",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "I'll do both tasks.",
+                    "tool_calls": [
+                        {
+                            "id": "call_1",
+                            "type": "function",
+                            "function": {
+                                "name": "bash",
+                                "arguments": "{\"command\":\"echo first\"}"
+                            }
+                        },
+                        {
+                            "id": "call_2",
+                            "type": "function",
+                            "function": {
+                                "name": "bash",
+                                "arguments": "{\"command\":\"echo second\"}"
+                            }
+                        }
+                    ]
+                },
+                "finish_reason": "tool_calls"
+            }]
+        })))
+
+        # Response 2: Final response (no more tools)
+        response2 = add_streaming_support(Mock(json=Mock(return_value={
+            "id": "chatcmpl-2",
+            "object": "chat.completion",
+            "created": 1234567891,
+            "model": "qwen3",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "Both done!",
+                    "tool_calls": None
+                },
+                "finish_reason": "stop"
+            }]
+        })))
+
+        mock_requests_post.side_effect = [response1, response2]
+
+        result = mock_client.chat("Do batch tasks", use_tools=True)
+
+        # Should have made 2 API calls (1 batch iteration + 1 final)
+        assert mock_requests_post.call_count == 2
+
+        # Should accumulate both tool calls from batch
+        assert len(mock_client.last_tool_calls) == 2
+        assert all(tc.function.name == "bash" for tc in mock_client.last_tool_calls)
+
+        # Final response should be clean
+        assert result == "Both done!"
+
+    def test_max_tool_iterations_limit(self, mock_client, mock_requests_post, add_streaming_support_fixture):
+        """Test that max_tool_iterations prevents infinite loops."""
+        add_streaming_support = add_streaming_support_fixture
+        mock_client.register_tools_from(builtin)
+
+        # Create response that always returns a tool call (infinite loop simulation)
+        infinite_response = add_streaming_support(Mock(json=Mock(return_value={
+            "id": "chatcmpl-loop",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "granite",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "<tool_call>{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"echo loop\\\"}\"}</tool_call>",
+                    "tool_calls": None
+                },
+                "finish_reason": "stop"
+            }]
+        })))
+
+        mock_requests_post.return_value = infinite_response
+
+        # Set max_tool_iterations to 3
+        result = mock_client.chat("Infinite loop test", use_tools=True, max_tool_iterations=3)
+
+        # Should stop after 3 iterations
+        assert mock_requests_post.call_count == 4  # Initial request + 3 tool iterations
+
+        # Should have accumulated 3 tool calls
+        assert len(mock_client.last_tool_calls) == 3
+
+    def test_tool_call_accumulation(self, mock_client, mock_requests_post, add_streaming_support_fixture):
+        """Test that all tool calls are accumulated correctly."""
+        add_streaming_support = add_streaming_support_fixture
+        from local_llm_sdk.models import ToolCall, FunctionCall
+
+        mock_client.register_tools_from(builtin)
+
+        responses = [
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-1",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "<tool_call>{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"echo 1\\\"}\"}</tool_call>",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            }))),
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-2",
+                "object": "chat.completion",
+                "created": 1234567891,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "<tool_call>{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"echo 2\\\"}\"}</tool_call>",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            }))),
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-3",
+                "object": "chat.completion",
+                "created": 1234567892,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Done!",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            })))
+        ]
+
+        mock_requests_post.side_effect = responses
+
+        result = mock_client.chat("Sequential test", use_tools=True)
+
+        # Verify all tool calls accumulated
+        assert len(mock_client.last_tool_calls) == 2
+
+        # Verify tool call order preserved
+        assert mock_client.last_tool_calls[0].function.arguments == '{"command":"echo 1"}'
+        assert mock_client.last_tool_calls[1].function.arguments == '{"command":"echo 2"}'
+
+    def test_xml_cleaning_across_iterations(self, mock_client, mock_requests_post, add_streaming_support_fixture):
+        """Test that XML markers are cleaned from responses in each iteration."""
+        add_streaming_support = add_streaming_support_fixture
+        mock_client.register_tools_from(builtin)
+
+        responses = [
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-1",
+                "object": "chat.completion",
+                "created": 1234567890,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Before <tool_call>{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"echo test\\\"}\"}</tool_call> After",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            }))),
+            add_streaming_support(Mock(json=Mock(return_value={
+                "id": "chatcmpl-2",
+                "object": "chat.completion",
+                "created": 1234567891,
+                "model": "granite",
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": "Final response without XML",
+                        "tool_calls": None
+                    },
+                    "finish_reason": "stop"
+                }]
+            }))),
+        ]
+
+        mock_requests_post.side_effect = responses
+
+        result = mock_client.chat("XML cleaning test", use_tools=True)
+
+        # Final response should be clean (no XML markers)
+        assert result == "Final response without XML"
+
+        # Tool call should be detected and executed
+        assert len(mock_client.last_tool_calls) == 1
+        assert mock_client.last_tool_calls[0].function.name == "bash"
+
+    def test_config_default_max_iterations(self, mock_requests_post, add_streaming_support_fixture):
+        """Test that max_tool_iterations uses config default when not specified."""
+        add_streaming_support = add_streaming_support_fixture
+        # Create client with custom config
+        client = LocalLLMClient("http://localhost:1234/v1", "test-model")
+        client.config["max_tool_iterations"] = 5
+        client.register_tools_from(builtin)
+
+        # Create infinite loop response
+        infinite_response = add_streaming_support(Mock(json=Mock(return_value={
+            "id": "chatcmpl-loop",
+            "object": "chat.completion",
+            "created": 1234567890,
+            "model": "granite",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": "<tool_call>{\"name\":\"bash\",\"arguments\":\"{\\\"command\\\":\\\"echo loop\\\"}\"}</tool_call>",
+                    "tool_calls": None
+                },
+                "finish_reason": "stop"
+            }]
+        })))
+
+        mock_requests_post.return_value = infinite_response
+
+        # Don't specify max_tool_iterations - should use config default (5)
+        result = client.chat("Config test", use_tools=True)
+
+        # Should stop after 5 iterations (config default)
+        assert mock_requests_post.call_count == 6  # Initial request + 5 tool iterations
+
+    def test_streaming_tool_calls_incremental_merge(self, mock_requests_post):
+        """Verify streaming tool calls are merged correctly, not overwritten."""
+        import os
+
+        # Enable streaming for this test
+        os.environ['LLM_STREAM'] = 'true'
+
+        client = LocalLLMClient()
+
+        # Mock streaming response that sends incremental tool call chunks
+        class MockStreamingResponse:
+            def __init__(self):
+                self.chunks = [
+                    # Chunk 1: First part of tool call with id and type
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_abc123","type":"function","function":{"name":"bash"}}]},"finish_reason":null}]}\n',
+                    # Chunk 2: First part of arguments
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"{\\\"command\\\":"}}]},"finish_reason":null}]}\n',
+                    # Chunk 3: More arguments
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\\\"echo test\\\""}}]},"finish_reason":null}]}\n',
+                    # Chunk 4: Final part of arguments
+                    'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"}"}}]},"finish_reason":null}]}\n',
+                    # Chunk 5: End
+                    'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n',
+                    'data: [DONE]\n'
+                ]
+                self.chunk_index = 0
+                self.status_code = 200
+
+            def raise_for_status(self):
+                pass
+
+            def iter_lines(self):
+                for chunk in self.chunks:
+                    yield chunk.encode('utf-8')
+
+            def close(self):
+                pass
+
+        mock_requests_post.return_value = MockStreamingResponse()
+
+        # Make a chat call - should handle streaming tool calls
+        response = client.chat("Test streaming tool calls", use_tools=False, return_full_response=True)
+
+        # Verify tool call was assembled correctly
+        assert response.choices[0].message.tool_calls is not None
+        assert len(response.choices[0].message.tool_calls) == 1
+
+        tool_call = response.choices[0].message.tool_calls[0]
+        assert tool_call.id == "call_abc123"
+        assert tool_call.type == "function"
+        assert tool_call.function.name == "bash"
+
+        # Critical: arguments should be complete JSON, not just the last chunk
+        assert tool_call.function.arguments == '{"command":"echo test"}'
+
+        # Cleanup
+        del os.environ['LLM_STREAM']

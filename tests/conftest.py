@@ -103,6 +103,12 @@ def add_streaming_support(mock_response):
     return mock_response
 
 
+@pytest.fixture
+def add_streaming_support_fixture():
+    """Fixture that returns the add_streaming_support helper function."""
+    return add_streaming_support
+
+
 def _create_streaming_iterator(response_json: Dict[str, Any]) -> list:
     """
     Create SSE-formatted streaming chunks from a response JSON.

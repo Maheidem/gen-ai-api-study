@@ -51,7 +51,7 @@ Client = LocalLLMClient
 
 
 # Convenience functions for quick setup
-def create_client_with_tools(base_url: str = "http://localhost:1234/v1", model: str = "auto") -> LocalLLMClient:
+def create_client_with_tools(base_url: str = None, model: str = None) -> LocalLLMClient:
     """
     Create a LocalLLMClient with built-in tools pre-loaded.
 
@@ -59,15 +59,15 @@ def create_client_with_tools(base_url: str = "http://localhost:1234/v1", model: 
     loads all built-in tools, making it ready to use immediately.
 
     Args:
-        base_url: Base URL for the local LLM API
-        model: Model to use ("auto" to auto-detect first available)
+        base_url: Base URL for the local LLM API (default: from LLM_BASE_URL env or http://localhost:1234/v1)
+        model: Model to use (default: from LLM_MODEL env or "auto")
 
     Returns:
         LocalLLMClient instance with tools loaded
 
     Example:
         >>> from local_llm_sdk import create_client_with_tools
-        >>> client = create_client_with_tools()
+        >>> client = create_client_with_tools()  # Uses LLM_MODEL env var if set
         >>> response = client.chat("What's 2+2?")
     """
     client = LocalLLMClient(base_url, model)

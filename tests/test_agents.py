@@ -135,10 +135,9 @@ class TestReACTAgent:
         prompt = ReACT.DEFAULT_SYSTEM_PROMPT
 
         # Check for key components
-        assert "execute_python" in prompt
-        assert "filesystem_operation" in prompt
+        assert "bash" in prompt
         assert "TASK_COMPLETE" in prompt
-        assert "tool" in prompt.lower()
+        assert "tool" in prompt.lower() or "bash" in prompt.lower()
         assert isinstance(prompt, str)
         assert len(prompt) > 100  # Substantial prompt
 
@@ -254,8 +253,8 @@ class TestReACTAgent:
         msg2.role = "assistant"
         msg2.content = "I'll calculate that"
         msg2.tool_calls = [
-            Mock(id="call_1", function=Mock(name="math_calculator")),
-            Mock(id="call_2", function=Mock(name="text_transformer"))
+            Mock(id="call_1", function=Mock(name="bash")),
+            Mock(id="call_2", function=Mock(name="bash"))
         ]
 
         msg3 = create_chat_message("tool", "Result: 8")
@@ -395,3 +394,112 @@ class TestReACTAgent:
         # Test with no TASK_COMPLETE
         result = agent._extract_final_answer("Regular response without marker")
         assert result == "Regular response without marker"
+
+    def test_react_consecutive_empty_response_handling(self):
+        """Verify agent stops gracefully after 3 consecutive empty responses."""
+        from unittest.mock import MagicMock
+        from contextlib import contextmanager
+
+        # Create mock client that returns a sequence of responses
+        mock_client = MagicMock()
+
+        # Mock conversation context manager
+        @contextmanager
+        def mock_conversation(name):
+            yield
+
+        mock_client.conversation = mock_conversation
+
+        # Sequence: meaningful response, then 3 consecutive empty responses
+        response1 = Mock()
+        response1.choices = [Mock()]
+        response1.choices[0].message = create_chat_message("assistant", "Task done successfully")
+
+        response2 = Mock()
+        response2.choices = [Mock()]
+        response2.choices[0].message = create_chat_message("assistant", "")
+
+        response3 = Mock()
+        response3.choices = [Mock()]
+        response3.choices[0].message = create_chat_message("assistant", "")
+
+        response4 = Mock()
+        response4.choices = [Mock()]
+        response4.choices[0].message = create_chat_message("assistant", "")
+
+        # Mock client returns sequence
+        mock_client.chat.side_effect = [response1, response2, response3, response4]
+        mock_client.last_conversation_additions = []
+
+        # Create agent
+        agent = ReACT(mock_client)
+
+        # Run task
+        result = agent.run("Test task", max_iterations=15, verbose=False)
+
+        # Should stop gracefully after 3 empty responses, not hit MAX_ITERATIONS
+        assert result.status == AgentStatus.SUCCESS, f"Expected SUCCESS, got {result.status}"
+        assert result.iterations == 4  # 1 meaningful + 3 empty
+        assert result.metadata.get("stop_reason") == "consecutive_empty_responses"
+
+        # Final response should be the last meaningful content
+        assert result.final_response == "Task done successfully"
+
+    def test_react_alternative_stop_conditions(self):
+        """Verify stop detection with confirmation phrases."""
+        from unittest.mock import MagicMock
+        from contextlib import contextmanager
+
+        # Create mock client
+        mock_client = MagicMock()
+
+        # Mock conversation context manager
+        @contextmanager
+        def mock_conversation(name):
+            yield
+
+        mock_client.conversation = mock_conversation
+
+        # Test 1: Confirmation phrase after tool call → should stop
+        response1 = Mock()
+        response1.choices = [Mock()]
+        msg1 = create_chat_message("assistant", "Executing command...")
+        msg1.tool_calls = [Mock()]  # Simulate tool call
+        response1.choices[0].message = msg1
+
+        response2 = Mock()
+        response2.choices = [Mock()]
+        response2.choices[0].message = create_chat_message("assistant", "Successfully saved the file!")
+
+        mock_client.chat.side_effect = [response1, response2]
+        mock_client.last_conversation_additions = []
+
+        agent = ReACT(mock_client)
+        result = agent.run("Save a file", max_iterations=15, verbose=False)
+
+        # Should detect "successfully saved" and stop
+        assert result.status == AgentStatus.SUCCESS
+        assert result.iterations == 2
+
+        # Test 2: Confirmation phrase WITHOUT tool call → should NOT stop early
+        mock_client2 = MagicMock()
+        mock_client2.conversation = mock_conversation
+
+        # Just a response with confirmation phrase, no tool calls
+        responses = []
+        for i in range(5):
+            resp = Mock()
+            resp.choices = [Mock()]
+            resp.choices[0].message = create_chat_message("assistant", "Successfully saved")
+            responses.append(resp)
+
+        mock_client2.chat.side_effect = responses
+        mock_client2.last_conversation_additions = []
+
+        agent2 = ReACT(mock_client2)
+        result2 = agent2.run("Another task", max_iterations=5, verbose=False)
+
+        # Without recent tool calls, should NOT stop on confirmation phrases
+        # Will hit max_iterations
+        assert result2.status == AgentStatus.MAX_ITERATIONS
+        assert result2.iterations == 5

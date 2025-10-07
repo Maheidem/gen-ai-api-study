@@ -242,146 +242,115 @@ class TestGlobalToolDecorator:
 
 
 class TestBuiltinTools:
-    """Test builtin tools functionality."""
+    """Test builtin bash tool functionality."""
 
-    def test_math_calculator_addition(self):
-        """Test math_calculator with addition."""
-        result = tools.execute("math_calculator", {
-            "arg1": 5.0,
-            "arg2": 3.0,
-            "operation": "add"
+    def test_bash_tool_simple_command(self):
+        """Test bash tool with simple command."""
+        result = tools.execute("bash", {"command": "echo 'hello world'"})
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "hello world" in data["stdout"]
+        assert data["return_code"] == 0
+
+    def test_bash_tool_python_execution(self):
+        """Test bash tool executing Python code."""
+        result = tools.execute("bash", {"command": "python -c \"print(5 * 24)\""})
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "120" in data["stdout"]
+
+    def test_bash_tool_python_factorial(self):
+        """Test bash tool calculating factorial with Python."""
+        result = tools.execute("bash", {"command": "python -c \"import math; print(math.factorial(5))\""})
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "120" in data["stdout"]
+
+    def test_bash_tool_file_operations(self):
+        """Test bash tool with file operations."""
+        # Create, write, read, delete file
+        result = tools.execute("bash", {
+            "command": "echo 'test content' > /tmp/test_bash.txt && cat /tmp/test_bash.txt && rm /tmp/test_bash.txt"
         })
-        parsed_result = json.loads(result)
-        assert parsed_result["result"] == 8.0
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "test content" in data["stdout"]
 
-    def test_math_calculator_subtraction(self):
-        """Test math_calculator with subtraction."""
-        result = tools.execute("math_calculator", {
-            "arg1": 10.0,
-            "arg2": 3.0,
-            "operation": "subtract"
+    def test_bash_tool_chained_commands(self):
+        """Test bash tool with chained commands."""
+        result = tools.execute("bash", {
+            "command": "mkdir -p /tmp/bash_test_dir && echo 'content' > /tmp/bash_test_dir/file.txt && cat /tmp/bash_test_dir/file.txt && rm -rf /tmp/bash_test_dir"
         })
-        parsed_result = json.loads(result)
-        assert parsed_result["result"] == 7.0
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "content" in data["stdout"]
 
-    def test_math_calculator_multiplication(self):
-        """Test math_calculator with multiplication."""
-        result = tools.execute("math_calculator", {
-            "arg1": 4.0,
-            "arg2": 5.0,
-            "operation": "multiply"
-        })
-        parsed_result = json.loads(result)
-        assert parsed_result["result"] == 20.0
+    def test_bash_tool_error_handling(self):
+        """Test bash tool handles errors gracefully."""
+        result = tools.execute("bash", {"command": "ls /nonexistent_directory_xyz"})
+        data = json.loads(result)
+        assert data["success"] is False
+        assert data["return_code"] != 0
+        assert len(data["stderr"]) > 0
 
-    def test_math_calculator_division(self):
-        """Test math_calculator with division."""
-        result = tools.execute("math_calculator", {
-            "arg1": 15.0,
-            "arg2": 3.0,
-            "operation": "divide"
-        })
-        parsed_result = json.loads(result)
-        assert parsed_result["result"] == 5.0
+    def test_bash_tool_timeout(self):
+        """Test bash tool respects timeout."""
+        result = tools.execute("bash", {"command": "sleep 2", "timeout": 1})
+        data = json.loads(result)
+        assert data["success"] is False
+        assert "timed out" in data["stderr"].lower() or "timeout" in data.get("error", "").lower()
 
-    def test_math_calculator_division_by_zero(self):
-        """Test math_calculator division by zero."""
-        result = tools.execute("math_calculator", {
-            "arg1": 10.0,
-            "arg2": 0.0,
-            "operation": "divide"
-        })
-        parsed_result = json.loads(result)
-        assert "error" in parsed_result
+    def test_bash_tool_math_operations(self):
+        """Test bash tool for mathematical operations via Python."""
+        # Addition
+        result = tools.execute("bash", {"command": "python -c \"print(42 + 58)\""})
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "100" in data["stdout"]
 
-    def test_char_counter(self):
-        """Test char_counter tool."""
-        result = tools.execute("char_counter", {
-            "text": "Hello, World!"
-        })
-        parsed_result = json.loads(result)
+    def test_bash_tool_text_processing(self):
+        """Test bash tool for text processing."""
+        # Uppercase transformation using Python
+        result = tools.execute("bash", {"command": "python -c \"print('hello world'.upper())\""})
+        data = json.loads(result)
+        assert data["success"] is True
+        assert "HELLO WORLD" in data["stdout"]
 
-        assert parsed_result["text"] == "Hello, World!"
-        assert parsed_result["character_count"] == 13
-        assert parsed_result["word_count"] == 2
+    def test_bash_tool_return_structure(self):
+        """Test bash tool returns correct structure."""
+        result = tools.execute("bash", {"command": "echo 'test'"})
+        data = json.loads(result)
 
-    def test_char_counter_empty_string(self):
-        """Test char_counter with empty string."""
-        result = tools.execute("char_counter", {
-            "text": ""
-        })
-        parsed_result = json.loads(result)
-
-        assert parsed_result["character_count"] == 0
-        assert parsed_result["word_count"] == 0
-
-    def test_text_transformer_uppercase(self):
-        """Test text_transformer with uppercase."""
-        result = tools.execute("text_transformer", {
-            "text": "hello world",
-            "transform": "upper"
-        })
-        parsed_result = json.loads(result)
-
-        assert parsed_result["original"] == "hello world"
-        assert parsed_result["transformed"] == "HELLO WORLD"
-        assert parsed_result["transform_type"] == "upper"
-
-    def test_text_transformer_lowercase(self):
-        """Test text_transformer with lowercase."""
-        result = tools.execute("text_transformer", {
-            "text": "HELLO WORLD",
-            "transform": "lower"
-        })
-        parsed_result = json.loads(result)
-
-        assert parsed_result["transformed"] == "hello world"
-
-    def test_text_transformer_title(self):
-        """Test text_transformer with title case."""
-        result = tools.execute("text_transformer", {
-            "text": "hello world",
-            "transform": "title"
-        })
-        parsed_result = json.loads(result)
-
-        assert parsed_result["transformed"] == "Hello World"
-
-    def test_text_transformer_invalid_transform(self):
-        """Test text_transformer with invalid transform."""
-        result = tools.execute("text_transformer", {
-            "text": "hello",
-            "transform": "invalid"
-        })
-        parsed_result = json.loads(result)
-
-        assert "error" in parsed_result
-
-    def test_weather_tool_mock(self):
-        """Test weather tool (mocked since it's a placeholder)."""
-        result = tools.execute("get_weather", {
-            "city": "London"
-        })
-        parsed_result = json.loads(result)
-
-        # Should return some weather data structure
-        assert "city" in parsed_result
-        assert parsed_result["city"] == "London"
+        # Check all required fields are present
+        assert "success" in data
+        assert "stdout" in data
+        assert "stderr" in data
+        assert "return_code" in data
+        assert "command" in data
+        assert data["command"] == "echo 'test'"
 
     def test_builtin_tools_have_schemas(self):
-        """Test that all builtin tools have proper schemas."""
+        """Test that bash tool has proper schema."""
         schemas = tools.get_schemas()
 
-        # Should have multiple tools
-        assert len(schemas) > 0
+        # Should have at least the bash tool
+        assert len(schemas) >= 1
 
-        # Each schema should be a valid Tool object
+        # Find the bash tool
+        bash_schema = None
         for schema in schemas:
-            assert isinstance(schema, Tool)
-            assert schema.type == "function"
-            assert isinstance(schema.function, Function)
-            assert schema.function.name
-            assert schema.function.parameters
+            if schema.function.name == "bash":
+                bash_schema = schema
+                break
+
+        assert bash_schema is not None, "bash tool should be in schemas"
+
+        # Schema should be a valid Tool object
+        assert isinstance(bash_schema, Tool)
+        assert bash_schema.type == "function"
+        assert isinstance(bash_schema.function, Function)
+        assert bash_schema.function.name == "bash"
+        assert bash_schema.function.parameters
 
 
 class TestToolSchemaGeneration:

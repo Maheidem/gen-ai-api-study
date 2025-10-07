@@ -317,9 +317,11 @@ class LocalLLMClient:
 
     def _parse_text_tool_calls(self, content: str) -> List[ToolCall]:
         """
-        Parse text-based tool calls from content when model uses [TOOL_CALLS]format.
+        Parse text-based tool calls from content when model outputs non-standard formats.
 
-        Extracts tool calls in format: [TOOL_CALLS]tool_name[ARGS]{json_args}
+        Supports two formats:
+        1. [TOOL_CALLS]tool_name[ARGS]{json_args}  (original format)
+        2. <tool_call>{"name": "...", "arguments": {...}}</tool_call>  (XML-wrapped JSON)
 
         Args:
             content: Raw content that may contain text-based tool calls
@@ -328,40 +330,103 @@ class LocalLLMClient:
             List of ToolCall objects parsed from text
         """
         import re
+        import json
         import uuid
 
-        if not content or '[TOOL_CALLS]' not in content:
+        if not content:
             return []
 
         tool_calls = []
+        from .models import ToolCall, FunctionCall
 
-        # Pattern to match: [TOOL_CALLS]tool_name[ARGS]{...}
-        pattern = r'\[TOOL_CALLS\](\w+)\[ARGS\](\{[^}]+\})'
-        matches = re.findall(pattern, content)
+        # Format 1: [TOOL_CALLS]tool_name[ARGS]{...}
+        if '[TOOL_CALLS]' in content:
+            pattern = r'\[TOOL_CALLS\](\w+)\[ARGS\](\{[^}]+\})'
+            matches = re.findall(pattern, content)
 
-        for tool_name, args_json in matches:
-            try:
-                # Verify this is a registered tool
-                if tool_name not in self.tools.list_tools():
+            for tool_name, args_json in matches:
+                try:
+                    # Verify this is a registered tool
+                    if tool_name not in self.tools.list_tools():
+                        continue
+
+                    tool_call = ToolCall(
+                        id=str(uuid.uuid4().hex[:9]),
+                        type="function",
+                        function=FunctionCall(
+                            name=tool_name,
+                            arguments=args_json
+                        )
+                    )
+                    tool_calls.append(tool_call)
+
+                except Exception:
                     continue
 
-                # Create a ToolCall object
-                from .models import ToolCall, FunctionCall
-                tool_call = ToolCall(
-                    id=str(uuid.uuid4().hex[:9]),  # Generate ID like LM Studio
-                    type="function",
-                    function=FunctionCall(
-                        name=tool_name,
-                        arguments=args_json
-                    )
-                )
-                tool_calls.append(tool_call)
+        # Format 2: <tool_call>{"name": "...", "arguments": {...}}</tool_call>
+        if '<tool_call>' in content:
+            # Capture everything between <tool_call> tags (handles nested braces)
+            pattern = r'<tool_call>\s*(.*?)\s*</tool_call>'
+            matches = re.findall(pattern, content, re.DOTALL)
 
-            except Exception:
-                # Skip malformed tool calls
-                continue
+            for json_str in matches:
+                try:
+                    # Parse the JSON
+                    tool_data = json.loads(json_str)
+                    tool_name = tool_data.get('name')
+                    arguments = tool_data.get('arguments', {})
+
+                    # Verify this is a registered tool
+                    if not tool_name or tool_name not in self.tools.list_tools():
+                        continue
+
+                    # Convert arguments to JSON string if it's a dict
+                    if isinstance(arguments, dict):
+                        arguments = json.dumps(arguments)
+
+                    tool_call = ToolCall(
+                        id=str(uuid.uuid4().hex[:9]),
+                        type="function",
+                        function=FunctionCall(
+                            name=tool_name,
+                            arguments=arguments
+                        )
+                    )
+                    tool_calls.append(tool_call)
+
+                except Exception:
+                    continue
 
         return tool_calls
+
+    def _clean_tool_markers(self, content: str) -> str:
+        """
+        Clean XML and text-based tool call markers from content.
+
+        Removes:
+        - <tool_call>...</tool_call> tags (granite format)
+        - [TOOL_CALLS]...[ARGS]... markers (bracket format)
+
+        Args:
+            content: Text content that may contain tool markers
+
+        Returns:
+            Cleaned content with tool markers removed, or None if empty
+        """
+        if not content:
+            return None
+
+        import re
+
+        cleaned_content = content
+        # Remove <tool_call>...</tool_call> tags
+        cleaned_content = re.sub(r'<tool_call>.*?</tool_call>', '', cleaned_content, flags=re.DOTALL)
+        # Remove [TOOL_CALLS]...[ARGS]... markers
+        cleaned_content = re.sub(r'\[TOOL_CALLS\]\w+\[ARGS\]\{[^}]+\}', '', cleaned_content)
+        # Clean up extra whitespace
+        cleaned_content = cleaned_content.strip()
+
+        return cleaned_content or None
 
     def list_models(self) -> ModelList:
         """Get list of available models from LM Studio."""
@@ -381,6 +446,7 @@ class LocalLLMClient:
         stream: bool = None,  # None = use config default
         return_full_response: bool = False,
         include_thinking: bool = False,
+        max_tool_iterations: int = None,  # None = use config default
         **kwargs
     ) -> Union[str, ChatCompletion]:
         """
@@ -445,6 +511,10 @@ class LocalLLMClient:
         if stream is None:
             stream = self.config.get("stream", False)
 
+        # Use config default for max_tool_iterations if not explicitly provided
+        if max_tool_iterations is None:
+            max_tool_iterations = self.config.get("max_tool_iterations", 10)
+
         request = create_chat_completion_request(
             model=selected_model,
             messages=messages,
@@ -489,39 +559,69 @@ class LocalLLMClient:
             # Reset validator for next request
             self.streaming_validator.reset()
 
-        # Check for tool calls - structured or text-based
-        message = response.choices[0].message
-        has_structured_tools = message.tool_calls and len(message.tool_calls) > 0
+        # Tool execution loop - supports both batch (qwen3/mistral) and sequential (granite) patterns
+        iteration = 0
+        all_tool_calls = []  # Accumulate all tool calls across iterations
+        initial_message_count = len(messages)  # Track original message count for conversation additions
 
-        # If no structured tool calls but content has [TOOL_CALLS], parse them
-        if not has_structured_tools and use_tools and message.content:
-            text_tool_calls = self._parse_text_tool_calls(message.content)
-            if text_tool_calls:
-                # Add parsed tool calls to the message
-                message.tool_calls = text_tool_calls
-                has_structured_tools = True
+        while iteration < max_tool_iterations:
+            # Check for tool calls - structured or text-based
+            message = response.choices[0].message
+            has_structured_tools = message.tool_calls and len(message.tool_calls) > 0
 
-        # Handle tool calls if present
-        if has_structured_tools and use_tools:
-            # Store tool calls before they're lost in the second request
-            self.last_tool_calls = response.choices[0].message.tool_calls
+            # If no structured tool calls but content has [TOOL_CALLS], parse them
+            if not has_structured_tools and use_tools and message.content:
+                text_tool_calls = self._parse_text_tool_calls(message.content)
+                if text_tool_calls:
+                    # Add parsed tool calls to the message
+                    message.tool_calls = text_tool_calls
+                    has_structured_tools = True
 
-            # Extract thinking from the first response (which may have tool calls + thinking)
-            first_content = response.choices[0].message.content or ""
-            _, first_thinking = self._extract_thinking(first_content)
-            if first_thinking:
-                self.last_thinking = first_thinking
+                    # Clean the XML/text tool call markers from content
+                    message.content = self._clean_tool_markers(message.content)
 
-            # Get both response and full conversation state
+            # If no tools found, we're done
+            if not has_structured_tools or not use_tools:
+                break
+
+            # Accumulate tool calls for this iteration
+            all_tool_calls.extend(response.choices[0].message.tool_calls)
+
+            # Extract thinking from responses with tool calls
+            if iteration == 0:
+                # First iteration - extract thinking
+                first_content = response.choices[0].message.content or ""
+                _, first_thinking = self._extract_thinking(first_content)
+                if first_thinking:
+                    self.last_thinking = first_thinking
+
+            # Execute tools and get next response
             response, full_conversation_messages = self._handle_tool_calls(
                 response,
                 messages,
                 tool_choice=tool_choice
             )
 
-            # Store the additional messages that were created during tool execution
-            # These are: assistant_with_tool_calls + tool_result_messages + final_assistant
-            self.last_conversation_additions = full_conversation_messages[len(messages):]
+            # Update messages for next iteration (if needed)
+            messages = full_conversation_messages
+
+            # Store conversation additions from first iteration
+            if iteration == 0:
+                self.last_conversation_additions = full_conversation_messages[initial_message_count:]
+
+            iteration += 1
+
+        # Store all accumulated tool calls
+        self.last_tool_calls = all_tool_calls
+
+        # Log warning if we hit the iteration limit
+        if iteration >= max_tool_iterations and has_structured_tools:
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.warning(
+                f"Reached maximum tool iterations ({max_tool_iterations}). "
+                f"Model may have more tool calls to make. Consider increasing max_tool_iterations."
+            )
 
         # Extract thinking blocks from final response content
         content = response.choices[0].message.content or ""
@@ -705,7 +805,35 @@ class LocalLLMClient:
 
                             # Extract tool_calls delta
                             if 'tool_calls' in delta:
-                                accumulated_tool_calls = delta['tool_calls']
+                                delta_tool_calls = delta['tool_calls']
+
+                                if accumulated_tool_calls is None:
+                                    accumulated_tool_calls = []
+
+                                # Merge tool calls by index (streaming sends incremental chunks)
+                                for delta_tc in delta_tool_calls:
+                                    tc_index = delta_tc.get('index', 0)
+
+                                    # Extend list if needed
+                                    while len(accumulated_tool_calls) <= tc_index:
+                                        accumulated_tool_calls.append({
+                                            'id': None,
+                                            'type': 'function',
+                                            'function': {'name': None, 'arguments': ''}
+                                        })
+
+                                    # Merge fields incrementally
+                                    if 'id' in delta_tc:
+                                        accumulated_tool_calls[tc_index]['id'] = delta_tc['id']
+                                    if 'type' in delta_tc:
+                                        accumulated_tool_calls[tc_index]['type'] = delta_tc['type']
+                                    if 'function' in delta_tc:
+                                        func_delta = delta_tc['function']
+                                        if 'name' in func_delta:
+                                            accumulated_tool_calls[tc_index]['function']['name'] = func_delta['name']
+                                        if 'arguments' in func_delta:
+                                            # Accumulate arguments string incrementally
+                                            accumulated_tool_calls[tc_index]['function']['arguments'] += func_delta['arguments']
 
                             # Get finish reason
                             if 'finish_reason' in choice and choice['finish_reason']:
@@ -846,9 +974,9 @@ class LocalLLMClient:
 
         final_response = self._send_request(final_request)
 
-        # Preserve the tool calls from the first response on the final response
-        # This allows tracking and observability even after automatic tool execution
-        final_response.choices[0].message.tool_calls = original_tool_calls
+        # Note: Tool call preservation now handled by the execution loop in chat()
+        # The loop accumulates ALL tool calls across iterations for observability
+        # No need to overwrite here - final_response may contain NEW tool calls (sequential pattern)
 
         # Return both the response and the complete conversation state
         # The messages list includes: original + assistant_with_tools + tool_results + final_assistant
@@ -934,6 +1062,7 @@ class LocalLLMClient:
         stop_condition: callable = None,
         temperature: float = 0.7,
         verbose: bool = True,
+        model: str = None,
         **kwargs
     ):
         """
@@ -949,6 +1078,8 @@ class LocalLLMClient:
             stop_condition: Optional function that returns True when done
             temperature: Sampling temperature (default: 0.7)
             verbose: Whether to print progress (default: True)
+            model: Model to use (overrides client default). Allows dynamic
+                   model switching for model comparison tests.
             **kwargs: Additional arguments passed to the agent
 
         Returns:
@@ -963,6 +1094,12 @@ class LocalLLMClient:
             if result.success:
                 print(f"Completed in {result.iterations} iterations")
                 print(result.final_response)
+
+            # Or with specific model:
+            result = client.react(
+                task="Calculate fibonacci(10)",
+                model="mistralai/magistral-small-2509"
+            )
         """
         from .agents import ReACT
 
@@ -973,6 +1110,7 @@ class LocalLLMClient:
             stop_condition=stop_condition,
             temperature=temperature,
             verbose=verbose,
+            model=model,
             **kwargs
         )
 

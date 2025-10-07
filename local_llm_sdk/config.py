@@ -18,6 +18,9 @@ def get_default_config() -> Dict[str, Any]:
         LLM_TIMEOUT: Request timeout in seconds (default: 300)
         LLM_DEBUG: Enable debug logging (default: false)
 
+        # Tool calling settings
+        LLM_MAX_TOOL_ITERATIONS: Maximum tool execution iterations (default: 10)
+
         # Validation settings
         LLM_ENABLE_VALIDATION: Enable response validation (default: true)
         LLM_ENABLE_LLM_JUDGE: Enable LLM judge validator (default: false)
@@ -56,9 +59,15 @@ def get_default_config() -> Dict[str, Any]:
         "timeout": int(os.getenv("LLM_TIMEOUT", "300")),
         "debug": os.getenv("LLM_DEBUG", "false").lower() in ("true", "1", "yes"),
 
+        # Tool calling settings
+        "max_tool_iterations": int(os.getenv("LLM_MAX_TOOL_ITERATIONS", "10")),
+
         # Validation settings (disabled by default for backward compatibility)
         "enable_validation": os.getenv("LLM_ENABLE_VALIDATION", "false").lower() in ("true", "1", "yes"),
-        "enable_llm_judge": os.getenv("LLM_ENABLE_LLM_JUDGE", "false").lower() in ("true", "1", "yes"),
+        "validation_check_interval": int(os.getenv("LLM_VALIDATION_CHECK_INTERVAL", "20")),
+
+        # Streaming settings
+        "stream": os.getenv("LLM_STREAM", "false").lower() in ("true", "1", "yes"),
 
         # Detection thresholds
         "repetition_threshold": float(os.getenv("LLM_REPETITION_THRESHOLD", "0.5")),

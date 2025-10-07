@@ -35,33 +35,87 @@ class ReACT(BaseAgent):
         print(f"Completed in {result.iterations} iterations")
     """
 
-    DEFAULT_SYSTEM_PROMPT = """AI assistant with tool access. Be CONCISE.
+    DEFAULT_SYSTEM_PROMPT = """You are a helpful AI assistant with access to a bash tool.
 
-Tools:
-- execute_python: Test/compute in isolated environment (no file I/O to project)
-- filesystem_operation: Create/read/write files in project directory
-- math_calculator, text_transformer, char_counter, get_weather
+The bash tool lets you execute terminal commands for:
+- Calculations (python -c "print(5 * 4)")
+- Text processing (echo "text" | tr '[:lower:]' '[:upper:]')
+- File operations (echo "content" > file.txt)
+- System commands
 
-CRITICAL RULES:
-1. Use EXACTLY ONE tool per response - NEVER call multiple tools at once
-2. After EVERY tool call, wait for the result before deciding next step
-3. Break complex tasks into small, focused steps across multiple iterations
-4. Think step-by-step: explain → call tool → observe → explain → next tool
+IMPORTANT:
+- Call the bash tool ONE TIME per response
+- Wait for the result before making your next bash call
+- After each result, briefly explain what you learned
+- When the task is complete, state the final answer and end with TASK_COMPLETE
 
-Instructions:
-- execute_python for testing/computing → returns output
-- filesystem_operation for file writes → saves to project
-- After each tool result, explain what you learned before next action
-- When task is complete, state the FINAL ANSWER clearly, then say TASK_COMPLETE
+Work step-by-step. Multiple tool calls across iterations are expected.
 
-Example (note: each line is a SEPARATE response after tool result):
-User: Calculate 5 factorial, convert to uppercase, count characters
-You: I'll calculate 5 factorial first. [calls math_calculator ONLY]
-You: Got 120. Now converting to uppercase... [calls text_transformer ONLY]
-You: Got "120". Now counting characters... [calls char_counter ONLY]
-You: The answer is: The text "120" has 3 characters. TASK_COMPLETE
+═══════════════════════════════════════════════════════════════
+CRITICAL COMPLETION INSTRUCTIONS:
+═══════════════════════════════════════════════════════════════
 
-Quality over speed. ONE tool at a time. Multiple iterations expected."""
+When you have FULLY COMPLETED the task, you MUST:
+
+1. State the final answer or result clearly
+2. End your response with EXACTLY this text on a new line:
+
+   TASK_COMPLETE
+
+⚠️  Without this marker, the system will continue waiting for completion.
+
+═══════════════════════════════════════════════════════════════
+
+Remember: Reason about what to do, then act using tools. Keep iterating until the task is COMPLETE."""
+
+    def _check_task_completion(self, content: str, conversation: list) -> bool:
+        """
+        Check if task is complete using multiple heuristics.
+
+        Returns True if:
+        1. Explicit "TASK_COMPLETE" marker found
+        2. Confirmation phrases after successful tool execution
+
+        Args:
+            content: The response content to check
+            conversation: Full conversation history
+
+        Returns:
+            True if task should be considered complete
+        """
+        if not content:
+            return False
+
+        content_lower = content.lower()
+
+        # Check 1: Explicit marker (existing behavior)
+        if "TASK_COMPLETE" in content:
+            return True
+
+        # Check 2: Confirmation phrases after tool execution
+        confirmation_phrases = [
+            "successfully saved",
+            "task completed",
+            "task is complete",
+            "successfully created",
+            "file created successfully",
+            "all done",
+            "finished"
+        ]
+
+        has_confirmation = any(phrase in content_lower for phrase in confirmation_phrases)
+
+        if has_confirmation:
+            # Only consider complete if we've made tool calls recently (last 3 messages)
+            recent_tool_calls = 0
+            for msg in conversation[-3:]:
+                if hasattr(msg, 'tool_calls') and msg.tool_calls:
+                    recent_tool_calls += len(msg.tool_calls)
+
+            if recent_tool_calls > 0:
+                return True
+
+        return False
 
     def __init__(self, client, name: str = "ReACT", system_prompt: Optional[str] = None):
         """
@@ -74,6 +128,7 @@ Quality over speed. ONE tool at a time. Multiple iterations expected."""
         """
         super().__init__(client, name)
         self.system_prompt = system_prompt or self.DEFAULT_SYSTEM_PROMPT
+        self.MAX_CONSECUTIVE_EMPTY = 3
 
     def _execute(
         self,
@@ -81,7 +136,8 @@ Quality over speed. ONE tool at a time. Multiple iterations expected."""
         max_iterations: int = 15,
         stop_condition: Optional[Callable[[ChatMessage], bool]] = None,
         temperature: float = 0.7,
-        verbose: bool = True
+        verbose: bool = True,
+        model: str = None
     ) -> AgentResult:
         """
         Execute the ReACT agent loop.
@@ -92,6 +148,7 @@ Quality over speed. ONE tool at a time. Multiple iterations expected."""
             stop_condition: Optional function that returns True when task is complete
             temperature: Sampling temperature for the model
             verbose: Whether to print progress information
+            model: Model to use (overrides client default)
 
         Returns:
             AgentResult with execution details
@@ -109,6 +166,9 @@ Quality over speed. ONE tool at a time. Multiple iterations expected."""
             print(f"Task: {task[:100]}{'...' if len(task) > 100 else ''}")
             print(f"{'='*80}\n")
 
+        # Track consecutive empty responses
+        consecutive_empty_count = 0
+
         # Run ReACT loop
         for iteration in range(max_iterations):
             if verbose:
@@ -121,12 +181,42 @@ Quality over speed. ONE tool at a time. Multiple iterations expected."""
                     messages=messages,
                     use_tools=True,
                     return_full_response=True,
-                    temperature=temperature
+                    temperature=temperature,
+                    model=model,
+                    max_tokens=2048  # Prevent runaway generation
                 )
 
                 # Extract assistant message
                 assistant_message = response.choices[0].message
                 content = assistant_message.content or ""
+
+                # Check for consecutive empty responses
+                if not content or not content.strip():
+                    consecutive_empty_count += 1
+
+                    if consecutive_empty_count >= self.MAX_CONSECUTIVE_EMPTY:
+                        if verbose:
+                            print(f"⚠️  Detected {consecutive_empty_count} consecutive empty responses - stopping gracefully")
+
+                        # Find last meaningful response in conversation
+                        last_meaningful = ""
+                        for msg in reversed(messages):
+                            if hasattr(msg, 'content') and msg.content and msg.content.strip():
+                                last_meaningful = msg.content
+                                break
+
+                        return AgentResult(
+                            status=AgentStatus.SUCCESS,
+                            iterations=iteration + 1,
+                            final_response=last_meaningful or "Task completed successfully",
+                            conversation=messages,
+                            metadata={
+                                "total_tool_calls": self._count_tool_calls(messages),
+                                "stop_reason": "consecutive_empty_responses"
+                            }
+                        )
+                else:
+                    consecutive_empty_count = 0  # Reset on non-empty response
 
                 # Show progress
                 if verbose:
@@ -148,8 +238,8 @@ Quality over speed. ONE tool at a time. Multiple iterations expected."""
                     # Fallback: just append assistant message (no tools were used)
                     messages.append(assistant_message)
 
-                # Check stop conditions
-                if self._should_stop(content, stop_condition):
+                # Check stop conditions using multiple heuristics
+                if self._check_task_completion(content, messages) or (stop_condition and stop_condition(content)):
                     if verbose:
                         print(f"\n{'='*80}")
                         print(f"✓ Task completed successfully in {iteration + 1} iterations")

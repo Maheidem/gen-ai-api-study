@@ -13,3 +13,4 @@ mlflow>=3.0.0
 
 # Optional: For notebook testing
 testbook>=0.4.2
+ipynbname
