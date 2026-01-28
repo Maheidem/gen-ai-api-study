@@ -197,7 +197,7 @@ gen-ai-api-study/
 │   └── utils/                  # Utility functions
 │       └── __init__.py
 │
-├── tests/                      # Comprehensive test suite (~213 tests)
+├── tests/                      # Comprehensive test suite (200+ tests)
 │   ├── conftest.py            # Shared fixtures
 │   ├── pytest.ini             # Pytest configuration
 │   ├── golden_dataset.json    # Known-good tasks for regression
@@ -916,7 +916,7 @@ git commit -m "feat: add conversation reset functionality
 - Clears conversation history and last_conversation_additions
 - Add comprehensive test coverage
 
-Tests: 214 passed (was 213)"
+Tests: XXX passed"
 
 # Push to remote
 git push origin feature/add-conversation-reset

@@ -21,7 +21,7 @@ Local LLM SDK is a **type-safe Python SDK** for interacting with local LLM APIs 
 - Python 3.12.11 with Pydantic v2 for type safety
 - OpenAI API compatibility (LM Studio, Ollama, LocalAI)
 - MLflow integration (optional) for tracing and observability
-- Comprehensive testing (213+ unit tests + behavioral test suite)
+- Comprehensive testing (200+ unit tests + behavioral test suite)
 
 **Primary Use Cases:**
 - Local LLM interaction with type safety

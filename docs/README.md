@@ -2,7 +2,7 @@
 
 Welcome to the **Local LLM SDK** documentation. This SDK provides a type-safe Python interface for interacting with local LLM servers that implement the OpenAI API specification (LM Studio, Ollama, LocalAI, etc.).
 
-## 📚 Documentation Structure
+## Documentation Structure
 
 ### Getting Started
 - **[Installation](getting-started/installation.md)** - Setup and dependencies
@@ -15,32 +15,21 @@ Welcome to the **Local LLM SDK** documentation. This SDK provides a type-safe Py
 - **[Models](api-reference/models.md)** - Pydantic models reference
 - **[Tools](api-reference/tools.md)** - Tool system and built-in tools
 - **[Agents](api-reference/agents.md)** - Agent framework (ReACT, BaseAgent)
-- **[Configuration](api-reference/configuration.md)** - Config module reference
 
 ### Guides
 - **[Tool Calling](guides/tool-calling.md)** - Complete guide to tool/function calling
 - **[ReACT Agents](guides/react-agents.md)** - Building autonomous agents
 - **[Conversation Management](guides/conversation-management.md)** - Multi-turn conversations
-- **[MLflow Tracing](guides/mlflow-tracing.md)** - Observability and debugging
 - **[Production Patterns](guides/production-patterns.md)** - Error handling, retries, best practices
-- **[Custom Tools](guides/custom-tools.md)** - Creating your own tools
-- **[Migration from OpenAI](guides/migration-openai.md)** - Switching from OpenAI SDK
 
 ### Architecture
-- **[Overview](architecture/overview.md)** - System architecture and design
-- **[Client Architecture](architecture/client.md)** - How the client works internally
-- **[Tool System](architecture/tool-system.md)** - Tool registry and execution
-- **[Agent Framework](architecture/agent-framework.md)** - Agent patterns and implementation
-- **[Conversation State](architecture/conversation-state.md)** - Message handling deep dive
+- **[Overview](architecture/overview.md)** - System architecture and design principles
 
 ### Contributing
 - **[Development Guide](contributing/development.md)** - Setting up development environment
 - **[Testing Guide](contributing/testing.md)** - Writing and running tests
-- **[Behavioral Testing](contributing/behavioral-testing.md)** - LLM behavior validation
-- **[Code Style](contributing/code-style.md)** - Formatting and conventions
-- **[Pull Request Guide](contributing/pull-requests.md)** - Contributing workflow
 
-## 🚀 Quick Links
+## Quick Links
 
 ### For Users
 - [Installation & Setup](getting-started/installation.md)
@@ -52,13 +41,13 @@ Welcome to the **Local LLM SDK** documentation. This SDK provides a type-safe Py
 - [Development Setup](contributing/development.md)
 - [Architecture Overview](architecture/overview.md)
 - [Testing Guide](contributing/testing.md)
-- [Code Style Guide](contributing/code-style.md)
 
 ### For Researchers
-- [API Compatibility Research](./../.documentation/research-index.md)
-- [OpenAI vs LM Studio Comparison](./../.documentation/lm_studio_openai_api_comparison.md)
+- [API Compatibility Research](../.documentation/research-index.md)
+- [OpenAI vs LM Studio Comparison](../.documentation/lm_studio_openai_api_comparison.md)
+- [Model Compatibility Guide](../.documentation/model-compatibility-guide.md)
 
-## 📖 Interactive Tutorials
+## Interactive Tutorials
 
 The SDK includes 11 progressive Jupyter notebooks in `notebooks/`:
 
@@ -81,7 +70,7 @@ The SDK includes 11 progressive Jupyter notebooks in `notebooks/`:
 - `10-mini-project-code-helper.ipynb` - Code review assistant
 - `11-mini-project-data-analyzer.ipynb` - Data analysis pipeline
 
-## 🔧 Quick Reference
+## Quick Reference
 
 ### Installation
 ```bash
@@ -119,16 +108,16 @@ result = agent.run("Complex multi-step task", max_iterations=15)
 print(result.final_response)
 ```
 
-## 🆘 Getting Help
+## Getting Help
 
 - **Issues**: [GitHub Issues](https://github.com/Maheidem/gen-ai-api-study/issues)
 - **Discussions**: [GitHub Discussions](https://github.com/Maheidem/gen-ai-api-study/discussions)
 - **API Reference**: See [api-reference/](api-reference/) directory
 
-## 📝 License
+## License
 
 MIT License - see LICENSE file for details.
 
-## 🙏 Acknowledgments
+## Acknowledgments
 
 Built for compatibility with OpenAI API specification. Special thanks to the open-source LLM community.

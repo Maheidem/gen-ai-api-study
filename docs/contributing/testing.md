@@ -24,7 +24,7 @@ The SDK uses a three-tier testing approach:
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│ Tier 1: Unit Tests (~213 tests) - Fast, Mocked             │
+│ Tier 1: Unit Tests (200+ tests) - Fast, Mocked             │
 │ - Validates code logic                                      │
 │ - Run on every commit (<10s)                                │
 │ - Command: pytest tests/ -v                                 │

@@ -453,7 +453,7 @@ isort local_llm_sdk/
 
 ### Testing Philosophy
 
-- **Unit tests** (213+ tests): Fast, mocked tests for code correctness
+- **Unit tests**: Fast, mocked tests for code correctness
 - **Behavioral tests** (~20 tests): Real LLM validation with property-based assertions
 - **Golden dataset** (16 tasks): Regression tests with success rate tracking
 

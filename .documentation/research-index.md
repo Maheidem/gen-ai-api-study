@@ -21,7 +21,7 @@ This index provides a centralized reference for all research documentation in th
 ## Related Technical Documents
 
 ### Main Comparison Document
-- **File**: `/home/maheidem/gen-ai-api-study/lm_studio_openai_api_comparison.md`
+- **File**: `lm_studio_openai_api_comparison.md` (in this directory)
 - **Type**: Technical Reference
 - **Description**: Detailed API comparison with code examples, endpoint documentation, and implementation patterns
 - **Sections**:
@@ -78,12 +78,11 @@ All research documents in this repository follow these standards:
 - [Azure OpenAI Docs](https://learn.microsoft.com/en-us/azure/ai-foundry/openai/)
 
 ### Project Resources
-- Main comparison: `../lm_studio_openai_api_comparison.md`
-- Research docs: `.documentation/`
-- Code examples: Embedded in comparison document
+- Main comparison: `lm_studio_openai_api_comparison.md`
+- OpenAI reference: `openai-api-documentation.md`
+- Model compatibility: `model-compatibility-guide.md`
 
 ---
 
-*Index last updated: 2025-09-27*
-*Total documents: 2*
-*Next review: 2025-10-04*
+*Index last updated: 2025-10-06*
+*Total documents: 5*

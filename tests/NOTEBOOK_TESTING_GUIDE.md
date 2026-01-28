@@ -189,7 +189,7 @@ This means:
 # - Behavioral tests: 9 (REAL LLM)
 # - Golden dataset: 17 (REAL LLM)
 # - LM Studio live: 1 (REAL LLM)
-# = 269 total tests
+# = 200+ total tests (verify with pytest)
 
 # Default run (unit tests only):
 pytest tests/ -v

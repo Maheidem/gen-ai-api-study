@@ -1,7 +1,7 @@
 # tests/
 
 ## Purpose
-Comprehensive pytest-based test suite ensuring SDK reliability, correctness, and OpenAI API compatibility. All 213 tests passing with full coverage of new features.
+Comprehensive pytest-based test suite ensuring SDK reliability, correctness, and OpenAI API compatibility. 200+ tests with full coverage of SDK features.
 
 ## Contents
 
@@ -142,10 +142,9 @@ pytest tests/ --cov=local_llm_sdk --cov-report=html
 - `tool_test_function`, `complex_tool_test_function`: Tool testing helpers
 
 ## Test Stats
-- **Total Tests**: 213 passing, 3 skipped
-- **New Tests Added**: ~35 tests for agents, config, conversation state
-- **Coverage Increase**: ~15% (estimated)
-- **Test Files**: 10 total (3 new)
+- **Total Tests**: 200+ passing
+- **Test Files**: 10 core test files
+- **Coverage**: Comprehensive (client, models, tools, agents, config, integration)
 
 ## Key Fixes Made
 1. **Model Validation**: Strict role validation, optional usage field
